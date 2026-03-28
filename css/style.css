@@ -296,6 +296,8 @@ table th {
 }
 
 /* Admin Styles */
+.text-left { text-align: left; }
+
 .navbar {
     background: var(--bg-card);
     padding: 15px 30px;

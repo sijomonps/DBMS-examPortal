@@ -11,8 +11,9 @@
     <nav class="navbar">
         <div class="nav-brand">SQLab Examiner</div>
         <div class="nav-links">
-            <span id="adminName">Loading...</span>
-            <button id="logoutBtn" class="btn btn-outline btn-sm">Logout</button>
+            <span id="adminName" style="margin-right:15px;">Loading...</span>
+            <button id="changePwdBtn" class="btn btn-primary btn-sm" style="display:none; margin-right:10px;">Change Password</button>
+            <button id="logoutBtn" class="btn btn-outline btn-sm" style="display:none;">Logout</button>
         </div>
     </nav>
 
@@ -92,10 +93,31 @@
         </div>
     </div>
 
+    <!-- Password Change Modal -->
+    <div id="pwdModal" class="submit-overlay" style="display: none;">
+        <div class="submit-card text-left" style="min-width: 300px;">
+            <h2 style="margin-bottom: 20px;">Change Password</h2>
+            <form id="pwdForm">
+                <div class="form-group">
+                    <label>New Password</label>
+                    <input type="password" id="newPwd" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Confirm Password</label>
+                    <input type="password" id="confirmPwd" class="form-control" required>
+                </div>
+                <div id="pwdError" class="error-msg" style="display:none;"></div>
+                <div id="pwdSuccess" style="color:var(--success); font-weight:bold; margin-bottom:15px; display:none;">Password updated successfully!</div>
+                <button type="submit" id="updatePwdBtn" class="btn btn-primary">Update Password</button>
+                <button type="button" id="closePwdModal" class="btn btn-secondary" style="margin-left: 10px;">Cancel</button>
+            </form>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script type="module">
         import { initFirebase } from './js/config.js';
-        import { signInGoogle, signOutAdmin, authStateObserver } from './js/auth.js';
+        import { signInGoogle, signOutAdmin, authStateObserver, updateAdminPassword } from './js/auth.js';
         import { createExam, getExamsList, getSubmissionsForExam, saveMarks, getExamQuestions } from './js/db.js';
         import { createReadOnlyEditor } from './js/editor.js';
 
@@ -112,13 +134,17 @@
                 authStateObserver(user => {
                     if (user) {
                         currentAdmin = user;
-                        document.getElementById('adminName').textContent = user.displayName;
+                        document.getElementById('adminName').textContent = user.displayName || user.email;
+                        document.getElementById('logoutBtn').style.display = 'inline-block';
+                        document.getElementById('changePwdBtn').style.display = 'inline-block';
                         document.getElementById('authView').style.display = 'none';
                         document.getElementById('dashboardView').style.display = 'block';
                         loadExams();
                     } else {
                         currentAdmin = null;
                         document.getElementById('adminName').textContent = '';
+                        document.getElementById('logoutBtn').style.display = 'none';
+                        document.getElementById('changePwdBtn').style.display = 'none';
                         document.getElementById('authView').style.display = 'block';
                         document.getElementById('dashboardView').style.display = 'none';
                     }
@@ -136,6 +162,62 @@
 
         document.getElementById('logoutBtn').addEventListener('click', () => {
             signOutAdmin();
+        });
+
+        // Password Change logic
+        document.getElementById('changePwdBtn').addEventListener('click', () => {
+            document.getElementById('pwdForm').reset();
+            document.getElementById('pwdError').style.display = 'none';
+            document.getElementById('pwdSuccess').style.display = 'none';
+            document.getElementById('pwdModal').style.display = 'flex';
+        });
+
+        document.getElementById('closePwdModal').addEventListener('click', () => {
+            document.getElementById('pwdModal').style.display = 'none';
+        });
+
+        document.getElementById('pwdForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const newPwd = document.getElementById('newPwd').value;
+            const confirmPwd = document.getElementById('confirmPwd').value;
+            const errorEl = document.getElementById('pwdError');
+            const successEl = document.getElementById('pwdSuccess');
+            const btn = document.getElementById('updatePwdBtn');
+            
+            errorEl.style.display = 'none';
+            successEl.style.display = 'none';
+            
+            if (newPwd !== confirmPwd) {
+                errorEl.textContent = 'Passwords do not match.';
+                errorEl.style.display = 'block';
+                return;
+            }
+            if (newPwd.length < 6) {
+                errorEl.textContent = 'Password must be at least 6 characters.';
+                errorEl.style.display = 'block';
+                return;
+            }
+            
+            try {
+                btn.disabled = true;
+                btn.textContent = 'Updating...';
+                await updateAdminPassword(newPwd);
+                successEl.style.display = 'block';
+                setTimeout(() => {
+                    document.getElementById('pwdModal').style.display = 'none';
+                }, 2000);
+            } catch (err) {
+                console.error(err);
+                if (err.code === 'auth/requires-recent-login') {
+                    errorEl.textContent = 'Updating password requires a recent login. Please log out and sign back in to change your password.';
+                } else {
+                    errorEl.textContent = 'Failed to update password: ' + err.message;
+                }
+                errorEl.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Update Password';
+            }
         });
 
         // Tabs
