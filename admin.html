@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQLab - Examiner Dashboard</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="admin-bg">
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">SQLab Examiner</div>
+        <div class="nav-links">
+            <span id="adminName">Loading...</span>
+            <button id="logoutBtn" class="btn btn-outline btn-sm">Logout</button>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <!-- Auth View -->
+        <div id="authView" class="auth-section">
+            <div class="login-card mx-auto">
+                <h2>Examiner Login</h2>
+                <button id="loginBtn" class="btn btn-primary btn-block">Sign in with Google</button>
+            </div>
+        </div>
+
+        <!-- Dashboard View (hidden till auth) -->
+        <div id="dashboardView" style="display: none;">
+            <ul class="nav-tabs">
+                <li class="tab-item active" data-target="manageTab">Manage Exams</li>
+                <li class="tab-item" data-target="reviewTab">Review Submissions</li>
+            </ul>
+
+            <!-- Manage Exams Tab -->
+            <div id="manageTab" class="tab-content active">
+                <div class="card p-4 mb-4">
+                    <h3>Create New Exam</h3>
+                    <form id="createExamForm">
+                        <div class="form-group">
+                            <label>Exam Title</label>
+                            <input type="text" id="newExamTitle" required class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label>Exam Password (for students to enter)</label>
+                            <input type="text" id="newExamPassword" required class="form-control">
+                        </div>
+                        
+                        <h4>Questions</h4>
+                        <div id="questionsContainer">
+                            <div class="form-group question-row">
+                                <label>Q1</label>
+                                <textarea class="form-control q-input" rows="3" required></textarea>
+                            </div>
+                        </div>
+                        <button type="button" id="addQuestionBtn" class="btn btn-secondary btn-sm mb-3">+ Add Another Question</button>
+                        <br>
+                        <button type="submit" class="btn btn-primary">Save Exam</button>
+                    </form>
+                </div>
+                
+                <h4>Created Exams</h4>
+                <div id="examsList" class="exam-list">
+                    <!-- Loaded dynamically -->
+                </div>
+            </div>
+
+            <!-- Review Submissions Tab -->
+            <div id="reviewTab" class="tab-content" style="display: none;">
+                <div class="form-group">
+                    <label>Select Exam</label>
+                    <select id="examSelect" class="form-control">
+                        <option value="">-- Change later dynamically --</option>
+                    </select>
+                </div>
+                
+                <div class="d-flex">
+                    <!-- Student list -->
+                    <div class="student-list mt-3 col-3">
+                        <ul id="studentsUl" class="list-group">
+                        </ul>
+                    </div>
+                    
+                    <!-- Answers viewer -->
+                    <div class="answers-viewer mt-3 col-9 pl-3">
+                        <div id="submissionDetails">
+                            <p class="text-muted">Select a student to view answers.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script type="module">
+        import { initFirebase } from './js/config.js';
+        import { signInGoogle, signOutAdmin, authStateObserver } from './js/auth.js';
+        import { createExam, getExamsList, getSubmissionsForExam, saveMarks, getExamQuestions } from './js/db.js';
+        import { createReadOnlyEditor } from './js/editor.js';
+
+        let currentAdmin = null;
+        let exams = [];
+        let selectedExamQuestions = [];
+        let currentSubmissions = [];
+        let currentlySelectedStudent = null;
+        let editorInstances = [];
+
+        const init = async () => {
+            try {
+                await initFirebase();
+                authStateObserver(user => {
+                    if (user) {
+                        currentAdmin = user;
+                        document.getElementById('adminName').textContent = user.displayName;
+                        document.getElementById('authView').style.display = 'none';
+                        document.getElementById('dashboardView').style.display = 'block';
+                        loadExams();
+                    } else {
+                        currentAdmin = null;
+                        document.getElementById('adminName').textContent = '';
+                        document.getElementById('authView').style.display = 'block';
+                        document.getElementById('dashboardView').style.display = 'none';
+                    }
+                });
+            } catch (err) {
+                console.error("Firebase init failed:", err);
+            }
+        };
+
+        // UI Event Listeners
+        document.getElementById('loginBtn').addEventListener('click', async () => {
+            try { await signInGoogle(); } 
+            catch (err) { alert('Login failed: ' + err.message); }
+        });
+
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            signOutAdmin();
+        });
+
+        // Tabs
+        document.querySelectorAll('.tab-item').forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                
+                e.target.classList.add('active');
+                const targetId = e.target.getAttribute('data-target');
+                document.getElementById(targetId).classList.add('active');
+                
+                if (targetId === 'reviewTab') {
+                    populateExamSelect();
+                }
+            });
+        });
+
+        // Add question field
+        let qCount = 1;
+        document.getElementById('addQuestionBtn').addEventListener('click', () => {
+            qCount++;
+            const div = document.createElement('div');
+            div.className = 'form-group question-row';
+            div.innerHTML = `
+                <label>Q${qCount}</label>
+                <textarea class="form-control q-input" rows="3" required></textarea>
+            `;
+            document.getElementById('questionsContainer').appendChild(div);
+        });
+
+        // Create exam form
+        document.getElementById('createExamForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const title = document.getElementById('newExamTitle').value;
+            const pwd = document.getElementById('newExamPassword').value;
+            const qInputs = document.querySelectorAll('.q-input');
+            const questions = Array.from(qInputs).map(i => i.value.trim()).filter(q => q.length > 0);
+            
+            try {
+                const btn = e.target.querySelector('button[type="submit"]');
+                btn.disabled = true;
+                btn.textContent = 'Saving...';
+                
+                await createExam(title, pwd, questions);
+                
+                alert("Exam created successfully!");
+                e.target.reset();
+                // clear extra questions
+                document.getElementById('questionsContainer').innerHTML = `
+                    <div class="form-group question-row">
+                        <label>Q1</label>
+                        <textarea class="form-control q-input" rows="3" required></textarea>
+                    </div>`;
+                qCount = 1;
+                loadExams();
+                btn.disabled = false;
+                btn.textContent = 'Save Exam';
+            } catch (err) {
+                alert("Error creating exam: " + err.message);
+                e.target.querySelector('button[type="submit"]').disabled = false;
+                e.target.querySelector('button[type="submit"]').textContent = 'Save Exam';
+            }
+        });
+
+        const loadExams = async () => {
+            exams = await getExamsList();
+            const listDiv = document.getElementById('examsList');
+            if (exams.length === 0) {
+                listDiv.innerHTML = '<p class="text-muted">No exams created yet.</p>';
+                return;
+            }
+            
+            let html = '';
+            exams.forEach(ex => {
+                // Formatting creation date roughly
+                let dStr = 'Unknown date';
+                if(ex.createdAt) {
+                    const d = ex.createdAt.toDate ? ex.createdAt.toDate() : new Date();
+                    dStr = d.toLocaleString();
+                }
+                
+                html += `
+                <div class="card p-4 mb-3" style="background:var(--bg-main)">
+                    <h5 style="margin-bottom:10px">${ex.title}</h5>
+                    <p style="margin:5px 0"><strong>Password:</strong> <span style="color:var(--kw-color)">${ex.password}</span></p>
+                    <p style="margin:5px 0; font-size:0.9rem">Questions: ${ex.questions ? ex.questions.length : 0}</p>
+                    <p style="margin:5px 0; font-size:0.8rem" class="text-muted">Created: ${dStr}</p>
+                </div>
+                `;
+            });
+            listDiv.innerHTML = html;
+        };
+
+        const populateExamSelect = () => {
+            const select = document.getElementById('examSelect');
+            let html = '<option value="">-- Select Exam --</option>';
+            exams.forEach(ex => {
+                html += `<option value="${ex.id}">${ex.title}</option>`;
+            });
+            select.innerHTML = html;
+            
+            // reset view
+            document.getElementById('studentsUl').innerHTML = '';
+            document.getElementById('submissionDetails').innerHTML = '<p class="text-muted">Select an exam and then a student.</p>';
+        };
+
+        document.getElementById('examSelect').addEventListener('change', async (e) => {
+            const examId = e.target.value;
+            const ul = document.getElementById('studentsUl');
+            const details = document.getElementById('submissionDetails');
+            
+            if (!examId) {
+                ul.innerHTML = '';
+                details.innerHTML = '<p class="text-muted">Select an exam and then a student.</p>';
+                return;
+            }
+            
+            ul.innerHTML = '<li class="text-muted">Loading students...</li>';
+            details.innerHTML = '<p class="text-muted">Select a student.</p>';
+            
+            try {
+                // Need questions to review answers correctly
+                selectedExamQuestions = await getExamQuestions(examId);
+                currentSubmissions = await getSubmissionsForExam(examId);
+                
+                if (currentSubmissions.length === 0) {
+                    ul.innerHTML = '<li class="text-muted">No submissions found.</li>';
+                    return;
+                }
+                
+                ul.innerHTML = '';
+                currentSubmissions.forEach((sub, idx) => {
+                    const li = document.createElement('li');
+                    let status = sub.submittedAt ? "Submitted" : "In Progress (Partial Data)";
+                    li.innerHTML = `<strong>${sub.studentName}</strong><br><small class="text-muted">${status}</small>`;
+                    li.addEventListener('click', () => {
+                        document.querySelectorAll('#studentsUl li').forEach(el => el.style.borderColor = 'var(--border)');
+                        li.style.borderColor = 'var(--primary)';
+                        showStudentSubmission(idx);
+                    });
+                    ul.appendChild(li);
+                });
+                
+            } catch (err) {
+                ul.innerHTML = '<li style="color:red">Failed to load: ' + err.message + '</li>';
+            }
+        });
+
+        const showStudentSubmission = (idx) => {
+            const sub = currentSubmissions[idx];
+            currentlySelectedStudent = sub.studentName;
+            const details = document.getElementById('submissionDetails');
+            
+            let html = `<h4>Student: ${sub.studentName}</h4>
+                        <p class="text-muted" style="margin-bottom:20px;">
+                           Status: ${sub.submittedAt ? "Completed" : "In Progress"}<br>
+                           Auto-sync enabled. If internet was off, they might need to connect to push final answers.
+                        </p>
+                        
+                        <div id="answersList"></div>
+                        <button id="saveMarksBtn" class="btn btn-primary mt-3">Save All Marks</button>
+                        <div id="saveResult" class="mt-3" style="color:var(--success); display:none;">Marks saved!</div>
+                        `;
+                        
+            details.innerHTML = html;
+            
+            const answersList = document.getElementById('answersList');
+            const marksArr = sub.marks || [];
+            
+            editorInstances = []; // clear old editors
+            
+            // Loop over questions and create a viewer block
+            selectedExamQuestions.forEach((q, qIndex) => {
+                const answerText = (sub.answers && sub.answers[qIndex]) ? sub.answers[qIndex] : '-- No answer submitted --';
+                const mark = marksArr[qIndex] !== undefined ? marksArr[qIndex] : '';
+                
+                const block = document.createElement('div');
+                block.className = 'card p-4 mb-3';
+                block.style.background = 'var(--bg-main)';
+                block.innerHTML = `
+                    <div style="margin-bottom:15px">
+                        <strong>Q${qIndex + 1}:</strong> ${q}
+                    </div>
+                    <div id="cm-viewer-${qIndex}" style="height:150px; border:1px solid var(--border); margin-bottom:10px;"></div>
+                    <div class="d-flex" style="align-items:center;">
+                        <label style="margin-right:10px; font-weight:bold;">Marks:</label>
+                        <input type="number" class="form-control mark-input" data-index="${qIndex}" value="${mark}" style="width:100px; padding:5px;">
+                    </div>
+                `;
+                answersList.appendChild(block);
+                
+                // Initialize CodeMirror after injected
+                setTimeout(() => {
+                    editorInstances.push(createReadOnlyEditor(`cm-viewer-${qIndex}`, answerText));
+                }, 50);
+            });
+            
+            document.getElementById('saveMarksBtn').addEventListener('click', async () => {
+                const examId = document.getElementById('examSelect').value;
+                const newMarks = [];
+                document.querySelectorAll('.mark-input').forEach(input => {
+                    const i = parseInt(input.getAttribute('data-index'), 10);
+                    newMarks[i] = input.value !== '' ? Number(input.value) : null;
+                });
+                
+                try {
+                    await saveMarks(examId, sub.studentName, newMarks);
+                    document.getElementById('saveResult').style.display = 'block';
+                    setTimeout(() => document.getElementById('saveResult').style.display = 'none', 3000);
+                    
+                    // Update locally
+                    currentSubmissions[idx].marks = newMarks;
+                    
+                } catch(err) {
+                    alert("Failed to save marks: " + err.message);
+                }
+            });
+        };
+
+        // Bootstrap
+        init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQLab - Exam Environment</title>
+    <link rel="stylesheet" href="css/style.css">
+    
+    <!-- CodeMirror 6 loaded via CDN in editor.js -->
+    <!-- sql.js loaded via CDN in sqlengine.js -->
+</head>
+<body class="exam-bg">
+    <div class="exam-container">
+        <!-- Top Navigation Bar -->
+        <header class="exam-header">
+            <div class="exam-info">
+                <span class="exam-title" id="examTitleDisplay">Exam Title</span>
+                <span class="student-name">Student: <span id="studentNameDisplay">Name</span></span>
+            </div>
+            <div class="exam-controls">
+                <span class="question-counter">Question <span id="currentQuestionNum">1</span> of <span id="totalQuestions">0</span></span>
+                <span class="timer">Time Remaining: <span id="timeRemaining">--:--</span></span>
+            </div>
+        </header>
+
+        <!-- Main Layout Split -->
+        <div class="exam-workspace">
+            <!-- Left Panel: Question Context -->
+            <div class="panel-left">
+                <div class="panel-header">Context & Question</div>
+                <div class="panel-body">
+                    <h3 id="questionText">Loading question...</h3>
+                </div>
+            </div>
+
+            <!-- Right Panel: Editor & Results -->
+            <div class="panel-right">
+                <div class="panel-header editor-header">
+                    <span>SQL Editor</span>
+                    <button id="runQueryBtn" class="btn btn-primary btn-sm">Run Query</button>
+                </div>
+                
+                <!-- CodeMirror Container -->
+                <div id="editorContainer" class="editor-container"></div>
+
+                <div class="panel-header result-header">
+                    <span>Output</span>
+                    <div class="action-buttons">
+                        <button id="nextQuestionBtn" class="btn btn-success btn-sm">Save & Next</button>
+                    </div>
+                </div>
+
+                <!-- Execution Results -->
+                <div class="result-container">
+                    <div id="errorDisplay" class="error-msg" style="display: none;"></div>
+                    <div id="tableDisplay" class="table-responsive"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Thank you overlay -->
+    <div id="submitOverlay" class="submit-overlay" style="display: none;">
+        <div class="submit-card">
+            <h2>Your answers have been submitted!</h2>
+            <p>You can safely close this page.</p>
+        </div>
+    </div>
+
+    <!-- Initialization script -->
+    <script type="module">
+        import { initFirebase } from './js/config.js';
+        import { getExamQuestions, saveStudentAnswer, submitExam } from './js/db.js';
+        import { initSqlEngine, runQuery } from './js/sqlengine.js';
+        import { initEditor, getEditorContent, setEditorContent } from './js/editor.js';
+
+        let examId = sessionStorage.getItem('sqlab_examId');
+        let studentName = sessionStorage.getItem('sqlab_studentName');
+        let examTitle = sessionStorage.getItem('sqlab_examTitle');
+        
+        let questions = [];
+        let currentQuestionIndex = 0;
+
+        const init = async () => {
+            if (!examId || !studentName) {
+                alert("Missing session details. Please login again.");
+                window.location.href = 'index.html';
+                return;
+            }
+
+            document.getElementById('examTitleDisplay').textContent = examTitle;
+            document.getElementById('studentNameDisplay').textContent = studentName;
+            
+            try {
+                // Initialize Firebase
+                await initFirebase();
+                
+                // Fetch Questions
+                questions = await getExamQuestions(examId);
+                document.getElementById('totalQuestions').textContent = questions.length;
+                
+                if (questions.length === 0) {
+                    document.getElementById('questionText').textContent = "No questions found for this exam.";
+                    return;
+                }
+                
+                // Initialize SQL Engine
+                const sqlReady = await initSqlEngine();
+                if (!sqlReady) {
+                    showError("Failed to initialize local SQL engine.");
+                    return;
+                }
+                
+                // Initialize Editor
+                // Wait briefly for CSS to apply to container
+                setTimeout(() => {
+                    initEditor('editorContainer', 'SELECT * FROM employees;');
+                    loadQuestion(0);
+                }, 100);
+
+            } catch (err) {
+                console.error("Initialization error:", err);
+                showError("Initialization failed. Check internet connection for first load.");
+            }
+        };
+
+        const loadQuestion = (index) => {
+            if (index < 0 || index >= questions.length) return;
+            
+            currentQuestionIndex = index;
+            document.getElementById('currentQuestionNum').textContent = index + 1;
+            document.getElementById('questionText').textContent = questions[index];
+            
+            // Check localStorage if there's a saved answer for this question
+            const lsKey = `sqlab_answers_${examId}_${studentName}`;
+            let answersObj = JSON.parse(localStorage.getItem(lsKey) || '{}');
+            if (answersObj[index]) {
+                setEditorContent(answersObj[index]);
+            } else {
+                setEditorContent('-- Write your SQL query here \n');
+            }
+            
+            // Clear outputs
+            document.getElementById('tableDisplay').innerHTML = '';
+            document.getElementById('errorDisplay').style.display = 'none';
+
+            // Change button text if last question
+            const nextBtn = document.getElementById('nextQuestionBtn');
+            if (index === questions.length - 1) {
+                nextBtn.textContent = "Submit Exam";
+                nextBtn.classList.replace('btn-success', 'btn-danger');
+            } else {
+                nextBtn.textContent = "Save & Next";
+                nextBtn.classList.replace('btn-danger', 'btn-success');
+            }
+        };
+
+        const showError = (msg) => {
+            const errDiv = document.getElementById('errorDisplay');
+            errDiv.textContent = msg;
+            errDiv.style.display = 'block';
+            document.getElementById('tableDisplay').innerHTML = '';
+        };
+
+        const executeQueryClick = () => {
+            const sql = getEditorContent();
+            if (!sql.trim()) return;
+            
+            try {
+                const results = runQuery(sql);
+                document.getElementById('errorDisplay').style.display = 'none';
+                
+                if (results.columns.length === 0) {
+                    document.getElementById('tableDisplay').innerHTML = '<p style="padding:10px; color:var(--success)">Query executed successfully. (No output rows)</p>';
+                    return;
+                }
+                
+                // Render table
+                let html = '<table><thead><tr>';
+                results.columns.forEach(col => html += `<th>${col}</th>`);
+                html += '</tr></thead><tbody>';
+                
+                results.values.forEach(row => {
+                    html += '<tr>';
+                    row.forEach(val => html += `<td>${val === null ? 'NULL' : val}</td>`);
+                    html += '</tr>';
+                });
+                
+                html += '</tbody></table>';
+                document.getElementById('tableDisplay').innerHTML = html;
+                
+            } catch (err) {
+                showError("SQL Error: " + err.message);
+            }
+        };
+
+        const nextQuestionClick = async () => {
+            const sql = getEditorContent();
+            
+            // Save answer locally & queue for Firebase
+            await saveStudentAnswer(examId, studentName, currentQuestionIndex, sql);
+            
+            if (currentQuestionIndex === questions.length - 1) {
+                // Submit exam
+                await submitExam(examId, studentName);
+                document.getElementById('submitOverlay').style.display = 'flex';
+                // clear session to prevent returning easily
+                sessionStorage.removeItem('sqlab_examId');
+            } else {
+                loadQuestion(currentQuestionIndex + 1);
+            }
+        };
+
+        // Attach events
+        document.getElementById('runQueryBtn').addEventListener('click', executeQueryClick);
+        document.getElementById('nextQuestionBtn').addEventListener('click', nextQuestionClick);
+
+        // Bootstrap
+        init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQLab - Online SQL Exam Platform</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="login-bg">
+    <div class="login-container">
+        <div class="login-card">
+            <h1>SQLab</h1>
+            <p class="subtitle">Online SQL Exam Platform</p>
+            
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="studentName">Full Name</label>
+                    <input type="text" id="studentName" required placeholder="Enter your full name">
+                </div>
+                
+                <div class="form-group">
+                    <label for="examPassword">Exam Password</label>
+                    <input type="password" id="examPassword" required placeholder="Enter exam password">
+                </div>
+
+                <div id="loginError" class="error-msg" style="display: none;"></div>
+                
+                <button type="submit" class="btn btn-primary btn-block">Enter Exam</button>
+            </form>
+            
+            <div class="info-msg">
+                <i class="icon-info"></i> Internet connection is not required during the exam.
+            </div>
+            
+            <div class="admin-link">
+                <a href="admin.html">Examiner Login</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initFirebase } from './js/config.js';
+        import { verifyExamPassword } from './js/db.js';
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const studentName = document.getElementById('studentName').value.trim();
+            const examPassword = document.getElementById('examPassword').value.trim();
+            const errorEl = document.getElementById('loginError');
+            
+            try {
+                // Initialize Firebase if not already
+                await initFirebase();
+                
+                const exam = await verifyExamPassword(examPassword);
+                if (exam) {
+                    sessionStorage.setItem('sqlab_studentName', studentName);
+                    sessionStorage.setItem('sqlab_examId', exam.id);
+                    sessionStorage.setItem('sqlab_examTitle', exam.title);
+                    window.location.href = 'exam.html';
+                } else {
+                    errorEl.textContent = 'Invalid exam password';
+                    errorEl.style.display = 'block';
+                }
+            } catch (err) {
+                errorEl.textContent = 'Error connecting to database. Please check your connection.';
+                errorEl.style.display = 'block';
+                console.error(err);
+            }
+        });
+
+        // Register Service Worker for offline support
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+                .then(reg => console.log('SW registered', reg))
+                .catch(err => console.error('SW register failed', err));
+        }
+    </script>
+</body>
+</html>
