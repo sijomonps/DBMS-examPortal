@@ -69,7 +69,7 @@
 
     <!-- Initialization script -->
     <script type="module">
-        import { initFirebase } from './js/config.js';
+
         import { getExamQuestions, saveStudentAnswer, submitExam } from './js/db.js';
         import { initSqlEngine, runQuery } from './js/sqlengine.js';
         import { initEditor, getEditorContent, setEditorContent } from './js/editor.js';
@@ -92,8 +92,7 @@
             document.getElementById('studentNameDisplay').textContent = studentName;
             
             try {
-                // Initialize Firebase
-                await initFirebase();
+
                 
                 // Fetch Questions
                 questions = await getExamQuestions(examId);

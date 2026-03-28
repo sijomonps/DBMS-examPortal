@@ -40,7 +40,7 @@
 
     <!-- Firebase SDKs -->
     <script type="module">
-        import { initFirebase } from './js/config.js';
+
         import { verifyExamPassword } from './js/db.js';
 
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
@@ -50,8 +50,7 @@
             const errorEl = document.getElementById('loginError');
             
             try {
-                // Initialize Firebase if not already
-                await initFirebase();
+
                 
                 const exam = await verifyExamPassword(examPassword);
                 if (exam) {

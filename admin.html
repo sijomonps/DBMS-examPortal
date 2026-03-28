@@ -125,7 +125,7 @@
 
     <!-- Scripts -->
     <script type="module">
-        import { initFirebase } from './js/config.js';
+
         import { signInEmail, signOutAdmin, authStateObserver, updateAdminPassword } from './js/auth.js';
         import { createExam, getExamsList, getSubmissionsForExam, saveMarks, getExamQuestions } from './js/db.js';
         import { createReadOnlyEditor } from './js/editor.js';
@@ -139,7 +139,7 @@
 
         const init = async () => {
             try {
-                await initFirebase();
+
                 authStateObserver(user => {
                     if (user) {
                         currentAdmin = user;

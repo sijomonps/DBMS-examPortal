@@ -1,13 +1,13 @@
 import { 
     collection, doc, getDocs, getDoc, setDoc, query, where, addDoc, serverTimestamp, updateDoc
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-import { getDb } from './config.js';
+import { db } from './config.js';
 
 // ---- STUDENT FUNCTIONS ----
 
 // Verify exam password and return exam info if correct
 export async function verifyExamPassword(password) {
-    const db = getDb();
+
     const examsRef = collection(db, 'exams');
     const q = query(examsRef, where('password', '==', password));
     const querySnapshot = await getDocs(q);
@@ -24,7 +24,7 @@ export async function verifyExamPassword(password) {
 }
 
 export async function getExamQuestions(examId) {
-    const db = getDb();
+
     const docRef = doc(db, 'exams', examId);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
@@ -42,7 +42,7 @@ export async function saveStudentAnswer(examId, studentName, questionIndex, answ
     
     // 2. Queue write to Firestore (handled automatically by offline persistence)
     try {
-        const db = getDb();
+
         const submissionRef = doc(db, 'submissions', examId, 'students', studentName);
         
         // We ensure document exists first or merge fields
@@ -68,7 +68,7 @@ export async function saveStudentAnswer(examId, studentName, questionIndex, answ
 
 export async function submitExam(examId, studentName) {
     try {
-        const db = getDb();
+
         const submissionRef = doc(db, 'submissions', examId, 'students', studentName);
         await setDoc(submissionRef, {
             submittedAt: serverTimestamp()
@@ -82,7 +82,7 @@ export async function submitExam(examId, studentName) {
 // ---- ADMIN FUNCTIONS ----
 
 export async function createExam(title, password, questions) {
-    const db = getDb();
+
     const examsRef = collection(db, 'exams');
     await addDoc(examsRef, {
         title,
@@ -93,7 +93,7 @@ export async function createExam(title, password, questions) {
 }
 
 export async function getExamsList() {
-    const db = getDb();
+
     const examsRef = collection(db, 'exams');
     const snapshot = await getDocs(examsRef);
     return snapshot.docs.map(doc => ({
@@ -103,7 +103,7 @@ export async function getExamsList() {
 }
 
 export async function getSubmissionsForExam(examId) {
-    const db = getDb();
+
     const studentsRef = collection(db, 'submissions', examId, 'students');
     const snapshot = await getDocs(studentsRef);
     return snapshot.docs.map(doc => ({
@@ -113,7 +113,7 @@ export async function getSubmissionsForExam(examId) {
 }
 
 export async function saveMarks(examId, studentName, marksArray) {
-    const db = getDb();
+
     const submissionRef = doc(db, 'submissions', examId, 'students', studentName);
     await updateDoc(submissionRef, {
         marks: marksArray
