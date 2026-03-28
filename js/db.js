@@ -33,6 +33,18 @@ export async function getExamQuestions(examId) {
     return [];
 }
 
+export async function getFullExamDetails(examId) {
+    const docRef = doc(db, 'exams', examId);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+        return {
+            id: docSnap.id,
+            ...docSnap.data()
+        };
+    }
+    return null;
+}
+
 export async function saveStudentAnswer(examId, studentName, questionIndex, answerSql) {
     // 1. Save to localStorage as immediate offline backup
     const lsKey = `sqlab_answers_${examId}_${studentName}`;
@@ -81,15 +93,43 @@ export async function submitExam(examId, studentName) {
 
 // ---- ADMIN FUNCTIONS ----
 
-export async function createExam(title, password, questions) {
+export async function createExam(title, password, questions, durationMinutes = 60) {
 
     const examsRef = collection(db, 'exams');
     await addDoc(examsRef, {
         title,
         password,
         questions,
+        durationMinutes: parseInt(durationMinutes) || 60,
         createdAt: serverTimestamp()
     });
+}
+
+export async function updateExam(examId, updates) {
+    const docRef = doc(db, 'exams', examId);
+    
+    // Ensure durationMinutes is an integer if provided
+    if (updates.durationMinutes) {
+        updates.durationMinutes = parseInt(updates.durationMinutes) || 60;
+    }
+    
+    await updateDoc(docRef, {
+        ...updates,
+        updatedAt: serverTimestamp()
+    });
+}
+
+export async function updateExamQuestions(examId, questions) {
+    const docRef = doc(db, 'exams', examId);
+    await updateDoc(docRef, {
+        questions: questions,
+        updatedAt: serverTimestamp()
+    });
+}
+
+export async function deleteExam(examId) {
+    const docRef = doc(db, 'exams', examId);
+    await setDoc(docRef, { deleted: true, deletedAt: serverTimestamp() }, { merge: true });
 }
 
 export async function getExamsList() {

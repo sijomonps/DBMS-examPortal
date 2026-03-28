@@ -7,33 +7,41 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="login-bg">
-    <div class="login-container">
-        <div class="login-card">
-            <h1>SQLab</h1>
-            <p class="subtitle">Online SQL Exam Platform</p>
-            
-            <form id="loginForm">
-                <div class="form-group">
-                    <label for="studentName">Full Name</label>
-                    <input type="text" id="studentName" required placeholder="Enter your full name">
-                </div>
-                
-                <div class="form-group">
-                    <label for="examPassword">Exam Password</label>
-                    <input type="password" id="examPassword" required placeholder="Enter exam password">
-                </div>
+    <div class="login-shell">
+        <section class="login-hero" aria-hidden="true">
+            <p class="hero-kicker">SQLAB PORTAL</p>
+            <h1 class="hero-title">Attempt smart,<br><span>query wisely</span></h1>
+            <p class="hero-copy">A minimal SQL examination workspace with timed sessions, auto-save, and offline reliability.</p>
+        </section>
 
-                <div id="loginError" class="error-msg" style="display: none;"></div>
+        <div class="login-container">
+            <div class="login-card">
+                <h1>SQLab</h1>
+                <p class="subtitle">Online SQL Exam Platform</p>
                 
-                <button type="submit" class="btn btn-primary btn-block">Enter Exam</button>
-            </form>
-            
-            <div class="info-msg">
-                <i class="icon-info"></i> Internet connection is not required during the exam.
-            </div>
-            
-            <div class="admin-link">
-                <a href="admin.html">Examiner Login</a>
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label for="studentName">Full Name</label>
+                        <input type="text" id="studentName" required placeholder="Enter your full name">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="examPassword">Exam Password</label>
+                        <input type="password" id="examPassword" required placeholder="Enter exam password">
+                    </div>
+
+                    <div id="loginError" class="error-msg" style="display: none;"></div>
+                    
+                    <button type="submit" class="btn btn-primary btn-block">Enter Exam</button>
+                </form>
+                
+                <div class="info-msg">
+                    <i class="icon-info"></i> Internet connection is not required during the exam.
+                </div>
+                
+                <div class="admin-link">
+                    <a href="admin.html">Examiner Login</a>
+                </div>
             </div>
         </div>
     </div>
@@ -57,6 +65,8 @@
                     sessionStorage.setItem('sqlab_studentName', studentName);
                     sessionStorage.setItem('sqlab_examId', exam.id);
                     sessionStorage.setItem('sqlab_examTitle', exam.title);
+                    sessionStorage.setItem('sqlab_examDuration', exam.durationMinutes || 60);
+                    sessionStorage.removeItem('sqlab_examStartTime');
                     window.location.href = 'exam.html';
                 } else {
                     errorEl.textContent = 'Invalid exam password';

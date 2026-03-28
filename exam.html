@@ -20,6 +20,7 @@
             <div class="exam-controls">
                 <span class="question-counter">Question <span id="currentQuestionNum">1</span> of <span id="totalQuestions">0</span></span>
                 <span class="timer">Time Remaining: <span id="timeRemaining">--:--</span></span>
+                <button id="endExamBtn" class="btn btn-outline btn-sm" type="button">End Exam</button>
             </div>
         </header>
 
@@ -28,8 +29,12 @@
             <!-- Left Panel: Question Context -->
             <div class="panel-left">
                 <div class="panel-header">Context & Question</div>
-                <div class="panel-body">
-                    <h3 id="questionText">Loading question...</h3>
+                <div class="panel-body question-panel">
+                    <p class="question-list-head">Choose a question</p>
+                    <div id="questionList" class="question-list"></div>
+                    <div class="question-current">
+                        <h3 id="questionText">Loading question...</h3>
+                    </div>
                 </div>
             </div>
 
@@ -58,6 +63,17 @@
             </div>
         </div>
     </div>
+
+    <!-- Start exam welcome popup -->
+    <div id="welcomeOverlay" class="submit-overlay" style="display: none;">
+        <div class="submit-card welcome-card">
+            <p class="welcome-label">Welcome</p>
+            <h2 id="welcomeTitle">Welcome to Exam</h2>
+            <p class="welcome-meta">You are about to begin <strong id="welcomeExamName">Exam</strong>.</p>
+            <p class="welcome-meta">Duration: <strong id="welcomeExamDuration">60 minutes</strong></p>
+            <button id="beginExamBtn" class="btn btn-primary" type="button">Begin Exam</button>
+        </div>
+    </div>
     
     <!-- Thank you overlay -->
     <div id="submitOverlay" class="submit-overlay" style="display: none;">
@@ -80,6 +96,16 @@
         
         let questions = [];
         let currentQuestionIndex = 0;
+        let answersObj = {};
+        let examDuration = 60; // in minutes
+        let examStartTime = null;
+        let timerInterval = null;
+        let autoSaveInterval = null;
+        let examSubmitted = false;
+        let isFinalizing = false;
+        let editorReady = false;
+
+        const lsKey = () => `sqlab_answers_${examId}_${studentName}`;
 
         const init = async () => {
             if (!examId || !studentName) {
@@ -91,12 +117,17 @@
             document.getElementById('examTitleDisplay').textContent = examTitle;
             document.getElementById('studentNameDisplay').textContent = studentName;
             
+            // Get exam duration and start time from session
+            examDuration = parseInt(sessionStorage.getItem('sqlab_examDuration')) || 60;
+            const persistedStart = parseInt(sessionStorage.getItem('sqlab_examStartTime'), 10);
+            examStartTime = Number.isFinite(persistedStart) && persistedStart > 0 ? persistedStart : null;
+            
             try {
-
                 
                 // Fetch Questions
                 questions = await getExamQuestions(examId);
                 document.getElementById('totalQuestions').textContent = questions.length;
+                answersObj = JSON.parse(localStorage.getItem(lsKey()) || '{}');
                 
                 if (questions.length === 0) {
                     document.getElementById('questionText').textContent = "No questions found for this exam.";
@@ -114,13 +145,84 @@
                 // Wait briefly for CSS to apply to container
                 setTimeout(() => {
                     initEditor('editorContainer', 'SELECT * FROM employees;');
+                    editorReady = true;
+                    renderQuestionList();
                     loadQuestion(0);
+
+                    if (examStartTime) {
+                        beginExamSession(true);
+                    } else {
+                        showWelcomeOverlay();
+                    }
                 }, 100);
 
             } catch (err) {
                 console.error("Initialization error:", err);
                 showError("Initialization failed. Check internet connection for first load.");
             }
+        };
+
+        const showWelcomeOverlay = () => {
+            document.getElementById('welcomeTitle').textContent = `Welcome to ${examTitle}`;
+            document.getElementById('welcomeExamName').textContent = examTitle;
+            document.getElementById('welcomeExamDuration').textContent = `${examDuration} minutes`;
+            document.getElementById('welcomeOverlay').style.display = 'flex';
+        };
+
+        const beginExamSession = (isResume = false) => {
+            if (!isResume) {
+                examStartTime = Date.now();
+                sessionStorage.setItem('sqlab_examStartTime', examStartTime);
+            }
+
+            if (!timerInterval) startTimer();
+            if (!autoSaveInterval) startAutoSave();
+            document.getElementById('welcomeOverlay').style.display = 'none';
+        };
+
+        const renderQuestionList = () => {
+            const listEl = document.getElementById('questionList');
+            listEl.innerHTML = '';
+
+            questions.forEach((question, index) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'question-item';
+                button.dataset.index = String(index);
+
+                const qIndex = document.createElement('span');
+                qIndex.className = 'question-item-index';
+                qIndex.textContent = `Q${index + 1}`;
+
+                const qText = document.createElement('span');
+                qText.className = 'question-item-text';
+                qText.textContent = question;
+
+                button.appendChild(qIndex);
+                button.appendChild(qText);
+
+                button.addEventListener('click', async () => {
+                    await selectQuestion(index);
+                });
+
+                listEl.appendChild(button);
+            });
+
+            refreshQuestionListState();
+        };
+
+        const refreshQuestionListState = () => {
+            document.querySelectorAll('.question-item').forEach((item, index) => {
+                item.classList.toggle('active', index === currentQuestionIndex);
+                const answerValue = (answersObj[index] || '').trim();
+                item.classList.toggle('answered', answerValue.length > 0);
+            });
+        };
+
+        const selectQuestion = async (index) => {
+            if (index === currentQuestionIndex || examSubmitted || !editorReady) return;
+            await saveCurrentAnswer();
+            loadQuestion(index);
         };
 
         const loadQuestion = (index) => {
@@ -130,27 +232,51 @@
             document.getElementById('currentQuestionNum').textContent = index + 1;
             document.getElementById('questionText').textContent = questions[index];
             
-            // Check localStorage if there's a saved answer for this question
-            const lsKey = `sqlab_answers_${examId}_${studentName}`;
-            let answersObj = JSON.parse(localStorage.getItem(lsKey) || '{}');
-            if (answersObj[index]) {
+            if (answersObj[index] !== undefined) {
                 setEditorContent(answersObj[index]);
             } else {
                 setEditorContent('-- Write your SQL query here \n');
             }
+
+            refreshQuestionListState();
             
             // Clear outputs
             document.getElementById('tableDisplay').innerHTML = '';
             document.getElementById('errorDisplay').style.display = 'none';
 
-            // Change button text if last question
+            // Update save button label on last question for clarity.
             const nextBtn = document.getElementById('nextQuestionBtn');
             if (index === questions.length - 1) {
-                nextBtn.textContent = "Submit Exam";
-                nextBtn.classList.replace('btn-success', 'btn-danger');
+                nextBtn.textContent = "Save Response";
             } else {
                 nextBtn.textContent = "Save & Next";
-                nextBtn.classList.replace('btn-danger', 'btn-success');
+            }
+            nextBtn.classList.remove('btn-danger');
+            nextBtn.classList.add('btn-success');
+        };
+
+        const saveCurrentAnswer = async () => {
+            if (!editorReady || examSubmitted) return;
+
+            const sql = getEditorContent();
+            answersObj[currentQuestionIndex] = sql;
+            localStorage.setItem(lsKey(), JSON.stringify(answersObj));
+            refreshQuestionListState();
+
+            try {
+                await saveStudentAnswer(examId, studentName, currentQuestionIndex, sql);
+            } catch (err) {
+                console.warn('Save deferred by browser/offline cache:', err);
+            }
+        };
+
+        const saveAllEnteredAnswers = async () => {
+            const allSaves = Object.entries(answersObj).map(([idx, sql]) => {
+                return saveStudentAnswer(examId, studentName, Number(idx), sql);
+            });
+
+            if (allSaves.length > 0) {
+                await Promise.allSettled(allSaves);
             }
         };
 
@@ -159,6 +285,78 @@
             errDiv.textContent = msg;
             errDiv.style.display = 'block';
             document.getElementById('tableDisplay').innerHTML = '';
+        };
+
+        const startTimer = () => {
+            const timerEl = document.querySelector('.timer');
+            const tick = () => {
+                const elapsed = Date.now() - examStartTime;
+                const remaining = Math.max(0, examDuration * 60 * 1000 - elapsed);
+                const remainingSeconds = Math.floor(remaining / 1000);
+
+                const minutes = Math.floor(remainingSeconds / 60);
+                const seconds = remainingSeconds % 60;
+
+                document.getElementById('timeRemaining').textContent =
+                    `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
+                // Show warning style when 5 minutes or less are remaining.
+                timerEl.classList.toggle('urgent', minutes <= 5);
+
+                if (remaining <= 0) {
+                    clearInterval(timerInterval);
+                    finalizeExam('Time\'s Up!', 'Your exam has been automatically submitted.');
+                }
+            };
+
+            tick();
+            timerInterval = setInterval(tick, 1000);
+        };
+
+        const startAutoSave = () => {
+            autoSaveInterval = setInterval(async () => {
+                await saveCurrentAnswer();
+                
+                // Show auto-save indicator
+                const indicator = document.getElementById('autoSaveIndicator');
+                if (!indicator) {
+                    const ind = document.createElement('div');
+                    ind.id = 'autoSaveIndicator';
+                    ind.className = 'autosave-toast';
+                    ind.textContent = 'Auto-saved';
+                    document.body.appendChild(ind);
+                    setTimeout(() => ind.remove(), 1800);
+                }
+            }, 30000); // Auto-save every 30 seconds
+        };
+
+        const finalizeExam = async (title, message) => {
+            if (examSubmitted || isFinalizing) return;
+
+            isFinalizing = true;
+            try {
+                clearInterval(timerInterval);
+                clearInterval(autoSaveInterval);
+
+                await saveCurrentAnswer();
+                await saveAllEnteredAnswers();
+                await submitExam(examId, studentName);
+
+                examSubmitted = true;
+                document.getElementById('submitOverlay').style.display = 'flex';
+                document.getElementById('submitOverlay').querySelector('h2').textContent = title;
+                document.getElementById('submitOverlay').querySelector('p').textContent = message;
+
+                sessionStorage.removeItem('sqlab_examId');
+                sessionStorage.removeItem('sqlab_studentName');
+                sessionStorage.removeItem('sqlab_examStartTime');
+
+                document.getElementById('runQueryBtn').disabled = true;
+                document.getElementById('nextQuestionBtn').disabled = true;
+                document.getElementById('endExamBtn').disabled = true;
+            } finally {
+                isFinalizing = false;
+            }
         };
 
         const executeQueryClick = () => {
@@ -193,26 +391,35 @@
             }
         };
 
+        const getNextQuestionIndex = () => {
+            const unansweredIndex = questions.findIndex((_, idx) => {
+                if (idx === currentQuestionIndex) return false;
+                return !(answersObj[idx] || '').trim();
+            });
+
+            if (unansweredIndex !== -1) return unansweredIndex;
+            return (currentQuestionIndex + 1) % questions.length;
+        };
+
         const nextQuestionClick = async () => {
-            const sql = getEditorContent();
-            
-            // Save answer locally & queue for Firebase
-            await saveStudentAnswer(examId, studentName, currentQuestionIndex, sql);
-            
-            if (currentQuestionIndex === questions.length - 1) {
-                // Submit exam
-                await submitExam(examId, studentName);
-                document.getElementById('submitOverlay').style.display = 'flex';
-                // clear session to prevent returning easily
-                sessionStorage.removeItem('sqlab_examId');
-            } else {
-                loadQuestion(currentQuestionIndex + 1);
-            }
+            await saveCurrentAnswer();
+            loadQuestion(getNextQuestionIndex());
+        };
+
+        const endExamClick = async () => {
+            if (examSubmitted) return;
+
+            const confirmed = confirm('Are you sure you want to end the exam now? All entered answers will be saved and submitted.');
+            if (!confirmed) return;
+
+            await finalizeExam('Exam Submitted', 'Your entered answers were saved and submitted successfully.');
         };
 
         // Attach events
+        document.getElementById('beginExamBtn').addEventListener('click', () => beginExamSession(false));
         document.getElementById('runQueryBtn').addEventListener('click', executeQueryClick);
         document.getElementById('nextQuestionBtn').addEventListener('click', nextQuestionClick);
+        document.getElementById('endExamBtn').addEventListener('click', endExamClick);
 
         // Bootstrap
         init();

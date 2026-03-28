@@ -55,6 +55,10 @@
                             <label>Exam Password (for students to enter)</label>
                             <input type="text" id="newExamPassword" required class="form-control">
                         </div>
+                        <div class="form-group">
+                            <label>Duration (minutes)</label>
+                            <input type="number" id="newExamDuration" required class="form-control" value="60" min="1">
+                        </div>
                         
                         <h4>Questions</h4>
                         <div id="questionsContainer">
@@ -117,11 +121,44 @@
         </div>
     </div>
 
+    <!-- Edit Exam Modal -->
+    <div id="editExamModal" class="submit-overlay" style="display: none;">
+        <div class="submit-card text-left" style="min-width: 600px; max-height: 90vh; overflow-y: auto;">
+            <h2 style="margin-bottom: 20px;">Edit Exam</h2>
+            <form id="editExamForm">
+                <div class="form-group">
+                    <label>Exam Title</label>
+                    <input type="text" id="editExamTitle" required class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Exam Password</label>
+                    <input type="text" id="editExamPassword" required class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Duration (minutes)</label>
+                    <input type="number" id="editExamDuration" required class="form-control" min="1">
+                </div>
+                
+                <h4>Questions</h4>
+                <div id="editQuestionsContainer" style="margin-bottom: 15px;">
+                    <!-- Questions will be populated here -->
+                </div>
+                <button type="button" id="editAddQuestionBtn" class="btn btn-secondary btn-sm mb-3">+ Add Question</button>
+                
+                <div id="editExamError" class="error-msg" style="display:none;"></div>
+                <div id="editExamSuccess" style="color:var(--success); font-weight:bold; margin-bottom:15px; display:none;">Exam updated successfully!</div>
+                
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+                <button type="button" id="closeEditModal" class="btn btn-secondary" style="margin-left: 10px;">Cancel</button>
+            </form>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script type="module">
 
         import { signInEmail, signOutAdmin, authStateObserver, updateAdminPassword } from './js/auth.js';
-        import { createExam, getExamsList, getSubmissionsForExam, saveMarks, getExamQuestions } from './js/db.js';
+        import { createExam, getExamsList, getSubmissionsForExam, saveMarks, getExamQuestions, updateExam, updateExamQuestions, getFullExamDetails, deleteExam } from './js/db.js';
         import { createReadOnlyEditor } from './js/editor.js';
 
         let currentAdmin = null;
@@ -131,6 +168,8 @@
         let currentlySelectedStudent = null;
         let editorInstances = [];
         let currentExamId = null;
+        let currentEditingExamId = null;
+        let editQuestionsCount = 1;
 
         const init = async () => {
             try {
@@ -239,6 +278,128 @@
             }
         });
 
+        // Edit Exam Modal Handlers
+        const openEditExamModal = async (exam) => {
+            currentEditingExamId = exam.id;
+            editQuestionsCount = 0;
+            
+            document.getElementById('editExamTitle').value = exam.title;
+            document.getElementById('editExamPassword').value = exam.password;
+            document.getElementById('editExamDuration').value = exam.durationMinutes || 60;
+            
+            const qContainer = document.getElementById('editQuestionsContainer');
+            qContainer.innerHTML = '';
+            
+            const questions = exam.questions || [];
+            questions.forEach((q, idx) => {
+                editQuestionsCount++;
+                const div = document.createElement('div');
+                div.className = 'form-group edit-question-row';
+                div.innerHTML = `
+                    <div style="display: flex; gap: 10px; align-items: flex-start;">
+                        <div style="flex: 1;">
+                            <label>Q${idx + 1}</label>
+                            <textarea class="form-control edit-q-input" rows="3" required>${q}</textarea>
+                        </div>
+                        <button type="button" class="btn btn-danger btn-sm delete-q-btn" data-index="${idx}" style="height: fit-content; margin-top: 27px;">Delete</button>
+                    </div>
+                `;
+                qContainer.appendChild(div);
+            });
+            
+            document.getElementById('editExamError').style.display = 'none';
+            document.getElementById('editExamSuccess').style.display = 'none';
+            document.getElementById('editExamModal').style.display = 'flex';
+            
+            // Add delete button listeners
+            document.querySelectorAll('.delete-q-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    btn.closest('.edit-question-row').remove();
+                });
+            });
+        };
+
+        document.getElementById('editAddQuestionBtn').addEventListener('click', (e) => {
+            e.preventDefault();
+            editQuestionsCount++;
+            const div = document.createElement('div');
+            div.className = 'form-group edit-question-row';
+            div.innerHTML = `
+                <div style="display: flex; gap: 10px; align-items: flex-start;">
+                    <div style="flex: 1;">
+                        <label>Q${editQuestionsCount}</label>
+                        <textarea class="form-control edit-q-input" rows="3" required></textarea>
+                    </div>
+                    <button type="button" class="btn btn-danger btn-sm delete-q-btn" style="height: fit-content; margin-top: 27px;">Delete</button>
+                </div>
+            `;
+            document.getElementById('editQuestionsContainer').appendChild(div);
+            
+            div.querySelector('.delete-q-btn').addEventListener('click', (e) => {
+                e.preventDefault();
+                div.remove();
+            });
+        });
+
+        document.getElementById('closeEditModal').addEventListener('click', () => {
+            document.getElementById('editExamModal').style.display = 'none';
+        });
+
+        document.getElementById('editExamForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const title = document.getElementById('editExamTitle').value;
+            const password = document.getElementById('editExamPassword').value;
+            const duration = document.getElementById('editExamDuration').value;
+            const qInputs = document.querySelectorAll('.edit-q-input');
+            const questions = Array.from(qInputs).map(i => i.value.trim()).filter(q => q.length > 0);
+            
+            const errorEl = document.getElementById('editExamError');
+            const successEl = document.getElementById('editExamSuccess');
+            errorEl.style.display = 'none';
+            successEl.style.display = 'none';
+            
+            if (questions.length === 0) {
+                errorEl.textContent = 'Please add at least one question.';
+                errorEl.style.display = 'block';
+                return;
+            }
+            
+            try {
+                const btn = e.target.querySelector('button[type="submit"]');
+                btn.disabled = true;
+                btn.textContent = 'Saving...';
+                
+                await updateExam(currentEditingExamId, {
+                    title,
+                    password,
+                    durationMinutes: parseInt(duration)
+                });
+                
+                await updateExamQuestions(currentEditingExamId, questions);
+                
+                successEl.style.display = 'block';
+                setTimeout(() => {
+                    document.getElementById('editExamModal').style.display = 'none';
+                    loadExams();
+                }, 1500);
+            } catch (err) {
+                errorEl.textContent = 'Error updating exam: ' + err.message;
+                errorEl.style.display = 'block';
+                e.target.querySelector('button[type="submit"]').disabled = false;
+                e.target.querySelector('button[type="submit"]').textContent = 'Save Changes';
+            }
+        });
+
+        const handleDeleteExam = async (examId) => {
+            try {
+                await deleteExam(examId);
+                loadExams();
+            } catch (err) {
+                alert('Error deleting exam: ' + err.message);
+            }
+        };
+
         // Tabs
         document.querySelectorAll('.tab-item').forEach(tab => {
             tab.addEventListener('click', (e) => {
@@ -273,6 +434,7 @@
             e.preventDefault();
             const title = document.getElementById('newExamTitle').value;
             const pwd = document.getElementById('newExamPassword').value;
+            const duration = document.getElementById('newExamDuration').value;
             const qInputs = document.querySelectorAll('.q-input');
             const questions = Array.from(qInputs).map(i => i.value.trim()).filter(q => q.length > 0);
             
@@ -281,10 +443,11 @@
                 btn.disabled = true;
                 btn.textContent = 'Saving...';
                 
-                await createExam(title, pwd, questions);
+                await createExam(title, pwd, questions, duration);
                 
                 alert("Exam created successfully!");
                 e.target.reset();
+                document.getElementById('newExamDuration').value = '60';
                 // clear extra questions
                 document.getElementById('questionsContainer').innerHTML = `
                     <div class="form-group question-row">
@@ -318,17 +481,45 @@
                     const d = ex.createdAt.toDate ? ex.createdAt.toDate() : new Date();
                     dStr = d.toLocaleString();
                 }
+                const duration = ex.durationMinutes || 60;
                 
                 html += `
                 <div class="card p-4 mb-3" style="background:var(--bg-main)">
-                    <h5 style="margin-bottom:10px">${ex.title}</h5>
-                    <p style="margin:5px 0"><strong>Password:</strong> <span style="color:var(--kw-color)">${ex.password}</span></p>
-                    <p style="margin:5px 0; font-size:0.9rem">Questions: ${ex.questions ? ex.questions.length : 0}</p>
-                    <p style="margin:5px 0; font-size:0.8rem" class="text-muted">Created: ${dStr}</p>
+                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
+                        <div>
+                            <h5 style="margin-bottom:10px">${ex.title}</h5>
+                            <p style="margin:5px 0"><strong>Password:</strong> <span style="color:var(--kw-color)">${ex.password}</span></p>
+                            <p style="margin:5px 0"><strong>Duration:</strong> ${duration} minutes</p>
+                            <p style="margin:5px 0; font-size:0.9rem">Questions: ${ex.questions ? ex.questions.length : 0}</p>
+                            <p style="margin:5px 0; font-size:0.8rem" class="text-muted">Created: ${dStr}</p>
+                        </div>
+                        <div>
+                            <button class="btn btn-info btn-sm edit-exam-btn" data-exam-id="${ex.id}" style="margin-bottom: 5px; width: 80px;">Edit</button>
+                            <button class="btn btn-danger btn-sm delete-exam-btn" data-exam-id="${ex.id}" style="width: 80px;">Delete</button>
+                        </div>
+                    </div>
                 </div>
                 `;
             });
             listDiv.innerHTML = html;
+            
+            // Attach event listeners
+            document.querySelectorAll('.edit-exam-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const examId = e.target.getAttribute('data-exam-id');
+                    const exam = exams.find(ex => ex.id === examId);
+                    openEditExamModal(exam);
+                });
+            });
+            
+            document.querySelectorAll('.delete-exam-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const examId = e.target.getAttribute('data-exam-id');
+                    if (confirm('Are you sure you want to delete this exam?')) {
+                        handleDeleteExam(examId);
+                    }
+                });
+            });
         };
 
         const populateExamSelect = async () => {
