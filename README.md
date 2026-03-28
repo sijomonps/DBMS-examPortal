@@ -6,7 +6,7 @@ A complete offline-first SQL exam web application, designed specifically for sta
 - **Offline First**: Works fully without internet after the initial load. Exam answers save to `localStorage` and auto-sync to Firebase.
 - **In-Browser SQL Execution**: Powered by `sql.js` (SQLite compiled to WebAssembly), queries are genuinely run locally.
 - **Rich Editor**: Uses CodeMirror 6 for real-time SQL syntax highlighting.
-- **Examiner Dashboard**: View students' queries, run them, grade answers — fully authorized with Google Auth.
+- **Examiner Dashboard**: View students' queries, run them, grade answers — fully authorized with Email/Password Auth.
 - **100% Client Side**: Absolute zero backend hosting needed beside Firebase Firestore.
 
 ## Setup Instructions
@@ -14,7 +14,7 @@ A complete offline-first SQL exam web application, designed specifically for sta
 ### 1. Firebase Setup
 1. Go to the [Firebase Console](https://console.firebase.google.com/) and create a new project.
 2. Under "Build", click "Firestore Database" and create a database (Start in Test Mode or update rules below).
-3. Under "Build", click "Authentication" and enable "Google" sign-in.
+3. Under "Build", click "Authentication" and enable "Email/Password" sign-in. Create a user account manually in the Firebase console to use for login.
 4. Go to Project Settings -> General -> "Your apps" -> Add a Web App.
 5. Copy the `firebaseConfig` block.
 6. Open `js/config.js` and paste your `firebaseConfig` object, replacing the placeholder.
@@ -51,7 +51,7 @@ service cloud.firestore {
 ## Connecting
 
 - **Student Login**: `index.html` — requires the exam password setup by the Examiner.
-- **Examiner Dashboard**: `admin.html` — requires Google Auth. Only the accounts listed in Firebase Authentication can log in.
+- **Examiner Dashboard**: `admin.html` — requires Email/Password Auth. Only the accounts listed in Firebase Authentication can log in.
 
 ## Technologies Used
 - HTML, CSS, Vanilla JS

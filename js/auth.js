@@ -1,14 +1,12 @@
 import { 
-    getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, updatePassword 
+    getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, updatePassword 
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { getFirebaseAuth } from './config.js';
 
-const provider = new GoogleAuthProvider();
-
-export async function signInGoogle() {
+export async function signInEmail(email, password) {
     const auth = getFirebaseAuth();
     try {
-        const result = await signInWithPopup(auth, provider);
+        const result = await signInWithEmailAndPassword(auth, email, password);
         return result.user;
     } catch (error) {
         console.error("Auth error:", error);

@@ -21,8 +21,17 @@
         <!-- Auth View -->
         <div id="authView" class="auth-section">
             <div class="login-card mx-auto">
-                <h2>Examiner Login</h2>
-                <button id="loginBtn" class="btn btn-primary btn-block">Sign in with Google</button>
+                <h2 style="margin-bottom: 20px;">Examiner Login</h2>
+                <form id="loginForm">
+                    <div class="form-group">
+                        <input type="email" id="loginEmail" class="form-control" placeholder="Email Address" required>
+                    </div>
+                    <div class="form-group">
+                        <input type="password" id="loginPwd" class="form-control" placeholder="Password" required>
+                    </div>
+                    <div id="loginError" class="error-msg" style="display:none;"></div>
+                    <button type="submit" id="loginBtn" class="btn btn-primary btn-block">Login</button>
+                </form>
             </div>
         </div>
 
@@ -117,7 +126,7 @@
     <!-- Scripts -->
     <script type="module">
         import { initFirebase } from './js/config.js';
-        import { signInGoogle, signOutAdmin, authStateObserver, updateAdminPassword } from './js/auth.js';
+        import { signInEmail, signOutAdmin, authStateObserver, updateAdminPassword } from './js/auth.js';
         import { createExam, getExamsList, getSubmissionsForExam, saveMarks, getExamQuestions } from './js/db.js';
         import { createReadOnlyEditor } from './js/editor.js';
 
@@ -155,9 +164,24 @@
         };
 
         // UI Event Listeners
-        document.getElementById('loginBtn').addEventListener('click', async () => {
-            try { await signInGoogle(); } 
-            catch (err) { alert('Login failed: ' + err.message); }
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const pwd = document.getElementById('loginPwd').value;
+            const errorEl = document.getElementById('loginError');
+            const btn = document.getElementById('loginBtn');
+            errorEl.style.display = 'none';
+            btn.disabled = true;
+            btn.textContent = 'Logging in...';
+            try { 
+                await signInEmail(email, pwd); 
+            } catch (err) { 
+                errorEl.textContent = 'Invalid email or password';
+                errorEl.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Login';
+            }
         });
 
         document.getElementById('logoutBtn').addEventListener('click', () => {
