@@ -1,3 +1,22 @@
+/* --- Footer --- */
+.site-footer {
+    width: 100%;
+    background: rgba(7, 45, 29, 0.82);
+    color: var(--text-muted);
+    font-size: 1rem;
+    text-align: center;
+    padding: 1.1rem 0 1.2rem 0;
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -8px 32px rgba(2, 14, 9, 0.13);
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    z-index: 10;
+    letter-spacing: 0.01em;
+    font-family: 'Manrope', 'Segoe UI', sans-serif;
+    backdrop-filter: blur(8px);
+    user-select: none;
+}
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
 
 :root {
