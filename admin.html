@@ -84,8 +84,13 @@
                     </select>
                 </div>
                 
-                <div id="submissionsContainer" class="mt-4">
+                <div id="submissionsListContainer" class="mt-4">
                     <p class="text-muted">Select an exam to view submissions.</p>
+                </div>
+
+                <div id="studentDetailContainer" class="mt-4" style="display: none;">
+                    <button id="backToSubmissionsBtn" class="btn btn-secondary mb-3">&larr; Back to Students List</button>
+                    <div id="studentDetailContent"></div>
                 </div>
             </div>
         </div>
@@ -125,6 +130,7 @@
         let currentSubmissions = [];
         let currentlySelectedStudent = null;
         let editorInstances = [];
+        let currentExamId = null;
 
         const init = async () => {
             try {
@@ -340,112 +346,172 @@
                 });
                 select.innerHTML = html;
                 
-                const container = document.getElementById('submissionsContainer');
-                if(container) container.innerHTML = '<p class="text-muted">Select an exam to view submissions.</p>';
+                const listContainer = document.getElementById('submissionsListContainer');
+                if(listContainer) {
+                    listContainer.style.display = 'block';
+                    listContainer.innerHTML = '<p class="text-muted">Select an exam to view submissions.</p>';
+                }
+                const detailContainer = document.getElementById('studentDetailContainer');
+                if (detailContainer) detailContainer.style.display = 'none';
             } catch (err) {
                 console.error("[Review] Error loading exams list:", err);
                 select.innerHTML = '<option value="">Error loading exams</option>';
             }
         };
 
-        document.getElementById('examSelect').addEventListener('change', async (e) => {
-            const examId = e.target.value;
-            const container = document.getElementById('submissionsContainer');
+        const renderSubmissionsList = () => {
+            const listContainer = document.getElementById('submissionsListContainer');
+            listContainer.innerHTML = '';
             
-            if (!examId) {
-                container.innerHTML = '<p class="text-muted">Select an exam to view submissions.</p>';
+            if (currentSubmissions.length === 0) {
+                listContainer.innerHTML = '<p class="text-muted">No submissions yet for this exam.</p>';
                 return;
             }
             
-            container.innerHTML = '<p class="text-muted">Loading submissions...</p>';
-                console.log(`[Review] UI Trigger: Exam selected. examId = ${examId}`);
-            
-            try {
-                selectedExamQuestions = await getExamQuestions(examId);
-                console.log(`[Review] Detected ${selectedExamQuestions.length} questions for exam ${examId}`);
+            currentSubmissions.forEach((sub, subIdx) => {
+                const status = sub.submittedAt ? "Completed" : "In Progress";
                 
-                currentSubmissions = await getSubmissionsForExam(examId);
-                console.log(`[Review] Found ${currentSubmissions.length} student submissions`);
-                
-                if (currentSubmissions.length === 0) {
-                    container.innerHTML = '<p class="text-muted">No submissions yet for this exam.</p>';
-                    return;
+                // Calculate cumulative marks
+                let marksDisplay = `<span style="color:var(--text-muted)">Not Graded</span>`;
+                if (sub.marks && Array.isArray(sub.marks) && sub.marks.some(m => m !== null && m !== undefined)) {
+                    let total = 0;
+                    sub.marks.forEach(m => {
+                        if (typeof m === 'number') total += m;
+                    });
+                    marksDisplay = `Total Marks: <strong style="color:var(--success)">${total}</strong>`;
                 }
                 
-                container.innerHTML = '';
-                editorInstances = []; // Reset editors
+                const card = document.createElement('div');
+                card.className = 'card p-3 mb-3 d-flex';
+                card.style.justifyContent = 'space-between';
+                card.style.alignItems = 'center';
                 
-                currentSubmissions.forEach((sub, subIdx) => {
-                    console.log(`[Review] Building card for student: ${sub.studentName}`);
-                    
-                    const card = document.createElement('div');
-                    card.className = 'card p-4 mb-4';
-                    const status = sub.submittedAt ? "Completed" : "In Progress";
-                    
-                    card.innerHTML = `
-                        <h4 style="margin-bottom: 5px;">Student: ${sub.studentName}</h4>
-                        <p class="text-muted" style="margin-bottom: 20px;">Status: ${status}</p>
-                        <div class="answers-list" id="answers-list-${subIdx}"></div>
-                        <button id="saveMarksBtn-${subIdx}" class="btn btn-primary mt-3">Save Marks for ${sub.studentName}</button>
-                        <div id="saveResult-${subIdx}" class="mt-2" style="color:var(--success); display:none;">Marks saved!</div>
-                    `;
-                    container.appendChild(card);
-                    
-                    const answersList = card.querySelector(`#answers-list-${subIdx}`);
-                    const marksArr = sub.marks || [];
-                    
-                    selectedExamQuestions.forEach((q, qIndex) => {
-                        const answerText = (sub.answers && sub.answers[qIndex]) ? sub.answers[qIndex] : '-- No answer submitted --';
-                        const mark = marksArr[qIndex] !== undefined ? marksArr[qIndex] : '';
-                        
-                        const block = document.createElement('div');
-                        block.className = 'card p-4 mb-3';
-                        block.style.background = 'var(--bg-main)';
-                        
-                        const editorId = `cm-viewer-${subIdx}-${qIndex}`;
-                        
-                        block.innerHTML = `
-                            <div style="margin-bottom:15px">
-                                <strong>Q${qIndex + 1}:</strong> ${q}
-                            </div>
-                            <div id="${editorId}" style="height:150px; border:1px solid var(--border); margin-bottom:10px;"></div>
-                            <div class="d-flex" style="align-items:center;">
-                                <label style="margin-right:10px; font-weight:bold;">Marks:</label>
-                                <input type="number" class="form-control mark-input-${subIdx}" data-index="${qIndex}" value="${mark}" style="width:100px; padding:5px;">
-                            </div>
-                        `;
-                        answersList.appendChild(block);
-                        
-                        setTimeout(() => {
-                            editorInstances.push(createReadOnlyEditor(editorId, answerText));
-                        }, 50);
-                    });
-                    
-                    card.querySelector(`#saveMarksBtn-${subIdx}`).addEventListener('click', async () => {
-                        const newMarks = [];
-                        card.querySelectorAll(`.mark-input-${subIdx}`).forEach(input => {
-                            const i = parseInt(input.getAttribute('data-index'), 10);
-                            newMarks[i] = input.value !== '' ? Number(input.value) : null;
-                        });
-                        
-                        try {
-                            console.log(`[Review] Attempting to save marks for ${sub.studentName}:`, newMarks);
-                            await saveMarks(examId, sub.studentName, newMarks);
-                            const resDiv = card.querySelector(`#saveResult-${subIdx}`);
-                            resDiv.style.display = 'block';
-                            currentSubmissions[subIdx].marks = newMarks;
-                            setTimeout(() => resDiv.style.display = 'none', 3000);
-                        } catch(err) {
-                            alert("Failed to save marks: " + err.message);
-                        }
-                    });
+                card.innerHTML = `
+                    <div>
+                        <h5 style="margin-bottom: 5px;">${sub.studentName}</h5>
+                        <p class="text-muted" style="margin-bottom: 5px; font-size: 0.85rem;">Status: ${status}</p>
+                        <p style="margin: 0; font-size: 0.95rem;">${marksDisplay}</p>
+                    </div>
+                    <button class="btn btn-primary btn-sm view-student-btn" data-index="${subIdx}">View Answers</button>
+                `;
+                listContainer.appendChild(card);
+                
+                card.querySelector('.view-student-btn').addEventListener('click', () => {
+                    showStudentDetail(subIdx, currentExamId);
                 });
+            });
+        };
+
+        document.getElementById('backToSubmissionsBtn').addEventListener('click', () => {
+            document.getElementById('studentDetailContainer').style.display = 'none';
+            document.getElementById('submissionsListContainer').style.display = 'block';
+            // Re-render list to show updated totals if marks were saved
+            renderSubmissionsList();
+        });
+
+        document.getElementById('examSelect').addEventListener('change', async (e) => {
+            currentExamId = e.target.value;
+            const listContainer = document.getElementById('submissionsListContainer');
+            const detailContainer = document.getElementById('studentDetailContainer');
+            
+            detailContainer.style.display = 'none';
+            listContainer.style.display = 'block';
+            
+            if (!currentExamId) {
+                listContainer.innerHTML = '<p class="text-muted">Select an exam to view submissions.</p>';
+                return;
+            }
+            
+            listContainer.innerHTML = '<p class="text-muted">Loading submissions...</p>';
+            console.log(`[Review] UI Trigger: Exam selected. examId = ${currentExamId}`);
+            
+            try {
+                selectedExamQuestions = await getExamQuestions(currentExamId);
+                console.log(`[Review] Detected ${selectedExamQuestions.length} questions for exam ${currentExamId}`);
+                
+                currentSubmissions = await getSubmissionsForExam(currentExamId);
+                console.log(`[Review] Found ${currentSubmissions.length} student submissions`);
+                
+                renderSubmissionsList();
                 
             } catch (err) {
                 console.error("[Review] Error fetching submissions:", err);
-                container.innerHTML = '<p style="color:red">Failed to load: ' + err.message + '</p>';
+                listContainer.innerHTML = '<p style="color:red">Failed to load: ' + err.message + '</p>';
             }
         });
+
+        const showStudentDetail = (subIdx, examId) => {
+            document.getElementById('submissionsListContainer').style.display = 'none';
+            const detailContainer = document.getElementById('studentDetailContainer');
+            const content = document.getElementById('studentDetailContent');
+            detailContainer.style.display = 'block';
+            content.innerHTML = '';
+            editorInstances = []; // Reset editors
+            
+            const sub = currentSubmissions[subIdx];
+            console.log(`[Review] Displaying detail page for: ${sub.studentName}`);
+            
+            const status = sub.submittedAt ? "Completed" : "In Progress";
+            
+            const headerHtml = `
+                <h3 style="margin-bottom: 5px;">Student: ${sub.studentName}</h3>
+                <p class="text-muted" style="margin-bottom: 20px;">Status: ${status}</p>
+                <div class="answers-list" id="detail-answers-list"></div>
+                <button id="detailSaveMarksBtn" class="btn btn-primary mt-3">Save Marks</button>
+                <div id="detailSaveResult" class="mt-2" style="color:var(--success); display:none;">Marks saved!</div>
+            `;
+            content.innerHTML = headerHtml;
+            
+            const answersList = content.querySelector('#detail-answers-list');
+            const marksArr = sub.marks || [];
+            
+            selectedExamQuestions.forEach((q, qIndex) => {
+                const answerText = (sub.answers && sub.answers[qIndex]) ? sub.answers[qIndex] : '-- No answer submitted --';
+                const mark = marksArr[qIndex] !== undefined && marksArr[qIndex] !== null ? marksArr[qIndex] : '';
+                
+                const block = document.createElement('div');
+                block.className = 'card p-4 mb-3';
+                block.style.background = 'var(--bg-main)';
+                
+                const editorId = `cm-viewer-detail-${subIdx}-${qIndex}`;
+                
+                block.innerHTML = `
+                    <div style="margin-bottom:15px">
+                        <strong>Q${qIndex + 1}:</strong> ${q}
+                    </div>
+                    <div id="${editorId}" style="height:150px; border:1px solid var(--border); margin-bottom:10px;"></div>
+                    <div class="d-flex" style="align-items:center;">
+                        <label style="margin-right:10px; font-weight:bold;">Marks:</label>
+                        <input type="number" class="form-control detail-mark-input" data-index="${qIndex}" value="${mark}" style="width:100px; padding:5px;">
+                    </div>
+                `;
+                answersList.appendChild(block);
+                
+                setTimeout(() => {
+                    editorInstances.push(createReadOnlyEditor(editorId, answerText));
+                }, 50);
+            });
+            
+            content.querySelector('#detailSaveMarksBtn').addEventListener('click', async () => {
+                const newMarks = [];
+                content.querySelectorAll('.detail-mark-input').forEach(input => {
+                    const i = parseInt(input.getAttribute('data-index'), 10);
+                    newMarks[i] = input.value !== '' ? Number(input.value) : null;
+                });
+                
+                try {
+                    console.log(`[Review] Saving marks for ${sub.studentName}:`, newMarks);
+                    await saveMarks(examId, sub.studentName, newMarks);
+                    const resDiv = content.querySelector('#detailSaveResult');
+                    resDiv.style.display = 'block';
+                    currentSubmissions[subIdx].marks = newMarks; // Update local state!
+                    setTimeout(() => resDiv.style.display = 'none', 3000);
+                } catch(err) {
+                    alert("Failed to save marks: " + err.message);
+                }
+            });
+        };
+
 
         // Bootstrap
         init();
