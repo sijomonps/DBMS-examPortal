@@ -76,7 +76,7 @@
             </div>
 
             <!-- Review Submissions Tab -->
-            <div id="reviewTab" class="tab-content" style="display: none;">
+            <div id="reviewTab" class="tab-content">
                 <div class="form-group">
                     <label>Select Exam</label>
                     <select id="examSelect" class="form-control">
@@ -325,16 +325,27 @@
             listDiv.innerHTML = html;
         };
 
-        const populateExamSelect = () => {
+        const populateExamSelect = async () => {
+            if (!currentAdmin) return;
+            console.log("[Review] Fetching all exams for dropdown...");
             const select = document.getElementById('examSelect');
-            let html = '<option value="">-- Select Exam --</option>';
-            exams.forEach(ex => {
-                html += `<option value="${ex.id}">${ex.title}</option>`;
-            });
-            select.innerHTML = html;
+            select.innerHTML = '<option value="">Loading exams...</option>';
             
-            const container = document.getElementById('submissionsContainer');
-            if(container) container.innerHTML = '<p class="text-muted">Select an exam to view submissions.</p>';
+            try {
+                exams = await getExamsList();
+                console.log(`[Review] Fetched ${exams.length} exams for dropdown.`);
+                let html = '<option value="">-- Select an Exam --</option>';
+                exams.forEach(ex => {
+                    html += `<option value="${ex.id}">${ex.title}</option>`;
+                });
+                select.innerHTML = html;
+                
+                const container = document.getElementById('submissionsContainer');
+                if(container) container.innerHTML = '<p class="text-muted">Select an exam to view submissions.</p>';
+            } catch (err) {
+                console.error("[Review] Error loading exams list:", err);
+                select.innerHTML = '<option value="">Error loading exams</option>';
+            }
         };
 
         document.getElementById('examSelect').addEventListener('change', async (e) => {
@@ -347,7 +358,7 @@
             }
             
             container.innerHTML = '<p class="text-muted">Loading submissions...</p>';
-            console.log(`[Review] UI Trigger: Fetching examId: ${examId}`);
+                console.log(`[Review] UI Trigger: Exam selected. examId = ${examId}`);
             
             try {
                 selectedExamQuestions = await getExamQuestions(examId);
@@ -357,7 +368,7 @@
                 console.log(`[Review] Found ${currentSubmissions.length} student submissions`);
                 
                 if (currentSubmissions.length === 0) {
-                    container.innerHTML = '<p class="text-muted">No submissions found for this exam.</p>';
+                    container.innerHTML = '<p class="text-muted">No submissions yet for this exam.</p>';
                     return;
                 }
                 
