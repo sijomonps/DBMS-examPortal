@@ -103,13 +103,22 @@ export async function getExamsList() {
 }
 
 export async function getSubmissionsForExam(examId) {
-
+    console.log(`[DB] Fetching submissions for examId: ${examId}`);
+    // Using intermediate 'students' subcollection matching Firestore's requirement for odd segment paths
     const studentsRef = collection(db, 'submissions', examId, 'students');
+    console.log(`[DB] Target path: submissions/${examId}/students`);
+    
     const snapshot = await getDocs(studentsRef);
-    return snapshot.docs.map(doc => ({
-        studentName: doc.id,
-        ...doc.data()
-    }));
+    console.log(`[DB] Fetched ${snapshot.size} students under this exam.`);
+    
+    return snapshot.docs.map(doc => {
+        const payload = doc.data();
+        console.log(`[DB] Extracted student document (${doc.id}):`, payload);
+        return {
+            studentName: doc.id,
+            ...payload
+        };
+    });
 }
 
 export async function saveMarks(examId, studentName, marksArray) {
