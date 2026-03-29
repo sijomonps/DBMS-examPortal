@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SQLab - Online SQL Exam Platform</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=20260328-4">
 </head>
 <body class="login-bg">
     <div class="login-shell">
@@ -21,7 +21,7 @@
                 
                 <form id="loginForm">
                     <div class="form-group">
-                        <label for="studentName">Full Name</label>
+                        <label for="studentName">Reg_Name</label>
                         <input type="text" id="studentName" required placeholder="Enter your full name">
                     </div>
                     
@@ -62,11 +62,47 @@
                 
                 const exam = await verifyExamPassword(examPassword);
                 if (exam) {
+                    const studentLockKey = String(studentName || '').trim().toLowerCase();
+                    const lockKey = `sqlab_exam_locked_${exam.id}_${studentLockKey}`;
+                    if (localStorage.getItem(lockKey)) {
+                        errorEl.textContent = 'You have already ended this exam. Re-entry is blocked.';
+                        errorEl.style.display = 'block';
+                        return;
+                    }
+
+                    const normalizedQuestions = Array.isArray(exam.questions)
+                        ? exam.questions
+                            .map(q => String(q ?? '').trim())
+                            .filter(q => q.length > 0)
+                        : [];
+                    const durationMinutes = parseInt(exam.durationMinutes, 10) || 60;
+
                     sessionStorage.setItem('sqlab_studentName', studentName);
                     sessionStorage.setItem('sqlab_examId', exam.id);
                     sessionStorage.setItem('sqlab_examTitle', exam.title);
-                    sessionStorage.setItem('sqlab_examDuration', exam.durationMinutes || 60);
+                    sessionStorage.setItem('sqlab_examDuration', String(durationMinutes));
+                    sessionStorage.setItem('sqlab_examQuestions', JSON.stringify(normalizedQuestions));
                     sessionStorage.removeItem('sqlab_examStartTime');
+
+                    localStorage.setItem(`sqlab_exam_payload_${exam.id}`, JSON.stringify({
+                        id: exam.id,
+                        title: exam.title,
+                        durationMinutes,
+                        questions: normalizedQuestions,
+                        cachedAt: Date.now()
+                    }));
+
+                    localStorage.setItem('sqlab_exam_recovery_state', JSON.stringify({
+                        examId: exam.id,
+                        studentName,
+                        examTitle: exam.title,
+                        examDuration: durationMinutes,
+                        examStartTime: null,
+                        currentQuestionIndex: 0,
+                        pendingSubmission: false,
+                        updatedAt: Date.now()
+                    }));
+
                     window.location.href = 'exam.html';
                 } else {
                     errorEl.textContent = 'Invalid exam password';
@@ -81,15 +117,17 @@
 
         // Register Service Worker for offline support
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js')
-                .then(reg => console.log('SW registered', reg))
+            navigator.serviceWorker.register('sw.js?v=20260328-8')
+                .then(reg => {
+                    reg.update();
+                    console.log('SW registered', reg);
+                })
                 .catch(err => console.error('SW register failed', err));
         }
     </script>
-</script>
 
     <footer class="site-footer">
-        Made by Sijomon P S MCA-2025
+        Made by Sijomon P S MCA-202-27
     </footer>
 </body>
 </html>

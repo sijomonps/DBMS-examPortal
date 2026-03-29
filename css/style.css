@@ -1,23 +1,26 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+
 /* --- Footer --- */
 .site-footer {
     width: 100%;
-    background: rgba(7, 45, 29, 0.82);
+    background: rgba(7, 45, 29, 0.92);
     color: var(--text-muted);
-    font-size: 1rem;
+    font-size: 0.88rem;
     text-align: center;
-    padding: 1.1rem 0 1.2rem 0;
+    padding: 0.38rem 0 0.42rem 0;
     border-top: 1px solid var(--border);
-    box-shadow: 0 -8px 32px rgba(2, 14, 9, 0.13);
-    position: sticky;
+    box-shadow: 0 -4px 18px rgba(2, 14, 9, 0.10);
+    position: fixed;
     bottom: 0;
     left: 0;
-    z-index: 10;
+    z-index: 100;
     letter-spacing: 0.01em;
     font-family: 'Manrope', 'Segoe UI', sans-serif;
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(6px);
     user-select: none;
+    min-height: 28px;
+    line-height: 1.2;
 }
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
 
 :root {
     color-scheme: dark;
@@ -482,6 +485,49 @@ select.form-control:focus {
     background: rgba(130, 36, 36, 0.25);
 }
 
+.submission-pending-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.38rem;
+    border: 1px solid rgba(255, 198, 102, 0.68);
+    border-radius: 999px;
+    background: rgba(113, 70, 19, 0.34);
+    color: #ffe5b5;
+    padding: 0.42rem 0.78rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.submission-pending-badge[hidden] {
+    display: none !important;
+}
+
+.submission-pending-badge::before {
+    content: '';
+    width: 0.46rem;
+    height: 0.46rem;
+    border-radius: 999px;
+    background: #ffcc72;
+    box-shadow: 0 0 0 0 rgba(255, 198, 102, 0.55);
+    animation: submissionPendingPulse 1.7s ease-out infinite;
+    flex-shrink: 0;
+}
+
+@keyframes submissionPendingPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(255, 198, 102, 0.58);
+    }
+    70% {
+        box-shadow: 0 0 0 8px rgba(255, 198, 102, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(255, 198, 102, 0);
+    }
+}
+
 .exam-workspace {
     min-height: 0;
     flex: 1;
@@ -635,8 +681,49 @@ select.form-control:focus {
     height: 100%;
     font-family: 'JetBrains Mono', 'Consolas', monospace;
     font-size: 0.93rem;
-    color: #e4ffe7;
-    background: #062214;
+    color: #eaffef;
+    background: #0a2a19;
+}
+
+.cm-content,
+.cm-line {
+    color: #eaffef;
+}
+
+.cm-editor .cm-placeholder {
+    color: #8fb49d !important;
+}
+
+.cm-editor .cm-keyword {
+    color: #7deaff !important;
+    font-weight: 700;
+}
+
+.cm-editor .cm-operator {
+    color: #d5f6ff !important;
+}
+
+.cm-editor .cm-variableName {
+    color: #b8ff9d !important;
+}
+
+.cm-editor .cm-string {
+    color: #ffe28b !important;
+}
+
+.cm-editor .cm-number {
+    color: #ffb7eb !important;
+}
+
+.cm-editor .cm-comment {
+    color: #a4c3b0 !important;
+    font-style: italic;
+}
+
+.cm-editor .cm-typeName,
+.cm-editor .cm-bool,
+.cm-editor .cm-null {
+    color: #ffaea8 !important;
 }
 
 .cm-gutters {
@@ -788,6 +875,24 @@ table th {
     margin-top: 1rem;
 }
 
+.welcome-status {
+    margin-top: 0.85rem;
+    color: #ffd9d9;
+    font-size: 0.84rem;
+    font-weight: 600;
+}
+
+.submit-status {
+    margin-top: 0.85rem;
+    color: #c3dfcd;
+    font-size: 0.86rem;
+    font-weight: 600;
+}
+
+.submit-status.waiting {
+    color: #ddf4e5;
+}
+
 /* Admin */
 .admin-bg {
     min-height: 100vh;
@@ -884,6 +989,164 @@ table th {
 
 .list-group li:hover {
     background: rgba(14, 58, 39, 0.95);
+}
+
+.manage-header-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.manage-subtitle {
+    margin-top: 0.2rem;
+    font-size: 0.88rem;
+}
+
+.add-exam-plus-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    font-size: 1.5rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: linear-gradient(145deg, #c7ff76 0%, #95f14d 100%);
+    color: #0b2013;
+    box-shadow: 0 12px 24px rgba(161, 255, 89, 0.24);
+}
+
+.add-exam-plus-btn:hover {
+    background: linear-gradient(145deg, #d8ff96 0%, #a8fa62 100%);
+}
+
+.add-exam-modal-card {
+    width: min(92vw, 760px);
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.add-exam-modal-header {
+    margin-bottom: 1rem;
+}
+
+.add-question-list {
+    margin-bottom: 0.6rem;
+}
+
+.question-row {
+    margin-bottom: 0.8rem;
+}
+
+.add-exam-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.65rem;
+    margin-top: 1rem;
+}
+
+.exam-list {
+    margin-top: 0.7rem;
+}
+
+.exam-list-grid {
+    display: grid;
+    grid-template-columns: minmax(170px, 1.7fr) minmax(130px, 1fr) minmax(90px, 0.8fr) minmax(120px, 0.9fr) minmax(170px, 1.35fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.exam-list-head-row {
+    border-bottom: 1px solid var(--border);
+    color: #b8d9c3;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.1rem 0 0.72rem;
+}
+
+.exam-list-row {
+    border-bottom: 1px solid rgba(140, 232, 134, 0.18);
+    padding: 0.75rem 0;
+}
+
+.exam-list-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0.2rem;
+}
+
+.exam-cell {
+    color: #e7f8eb;
+    font-size: 0.9rem;
+    word-break: break-word;
+}
+
+.exam-cell-password {
+    color: var(--kw-color);
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 0.83rem;
+}
+
+.exam-actions-col,
+.exam-actions-cell {
+    justify-self: end;
+}
+
+.exam-row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.icon-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(11, 56, 36, 0.84);
+    color: #d8f2df;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    transition: transform 0.18s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.icon-btn:hover {
+    transform: translateY(-1px);
+    border-color: var(--border-strong);
+    background: rgba(18, 73, 47, 0.92);
+}
+
+.icon-btn svg {
+    width: 17px;
+    height: 17px;
+}
+
+.icon-btn.danger {
+    border-color: rgba(255, 121, 121, 0.4);
+    background: rgba(133, 42, 42, 0.6);
+    color: #ffdada;
+}
+
+.icon-btn.danger:hover {
+    border-color: rgba(255, 145, 145, 0.76);
+    background: rgba(158, 52, 52, 0.78);
+}
+
+.empty-exam-list {
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-md);
+    background: rgba(7, 39, 25, 0.5);
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 1rem;
 }
 
 /* Utilities */
@@ -983,6 +1246,44 @@ table th {
         flex-direction: column;
         align-items: flex-start;
     }
+
+    .exam-list-head-row {
+        display: none;
+    }
+
+    .exam-list-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 0.85rem;
+        margin-bottom: 0.65rem;
+        background: rgba(5, 34, 21, 0.55);
+    }
+
+    .exam-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+        min-width: 0;
+    }
+
+    .exam-cell::before {
+        content: attr(data-label);
+        color: var(--text-soft);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.62rem;
+        font-weight: 700;
+    }
+
+    .exam-actions-cell {
+        grid-column: 1 / -1;
+    }
+
+    .exam-row-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
 }
 
 @media (max-width: 720px) {
@@ -1017,6 +1318,13 @@ table th {
         width: fit-content;
     }
 
+    .submission-pending-badge {
+        width: 100%;
+        justify-content: center;
+        white-space: normal;
+        text-align: center;
+    }
+
     .panel-body {
         padding: 0.95rem;
     }
@@ -1031,5 +1339,18 @@ table th {
 
     .container {
         width: 94vw;
+    }
+
+    .manage-header-card {
+        align-items: flex-start;
+    }
+
+    .add-exam-actions {
+        flex-direction: column-reverse;
+        align-items: stretch;
+    }
+
+    .add-exam-actions .btn {
+        width: 100%;
     }
 }

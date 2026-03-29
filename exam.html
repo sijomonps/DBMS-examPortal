@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SQLab - Exam Environment</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=20260328-4">
+    <link rel="stylesheet" href="css/offline-indicator.css?v=20260328-2">
     
     <!-- CodeMirror 6 loaded via CDN in editor.js -->
     <!-- sql.js loaded via CDN in sqlengine.js -->
@@ -20,6 +21,7 @@
             <div class="exam-controls">
                 <span class="question-counter">Question <span id="currentQuestionNum">1</span> of <span id="totalQuestions">0</span></span>
                 <span class="timer">Time Remaining: <span id="timeRemaining">--:--</span></span>
+                <span id="submissionPendingBadge" class="submission-pending-badge" aria-live="polite" hidden>EXAM ENDED-NO CHANGES WILL BE RECORDED FROM NOW</span>
                 <button id="endExamBtn" class="btn btn-outline btn-sm" type="button">End Exam</button>
             </div>
         </header>
@@ -71,6 +73,7 @@
             <h2 id="welcomeTitle">Welcome to Exam</h2>
             <p class="welcome-meta">You are about to begin <strong id="welcomeExamName">Exam</strong>.</p>
             <p class="welcome-meta">Duration: <strong id="welcomeExamDuration">60 minutes</strong></p>
+            <p id="beginExamStatus" class="welcome-status" style="display: none;"></p>
             <button id="beginExamBtn" class="btn btn-primary" type="button">Begin Exam</button>
         </div>
     </div>
@@ -78,8 +81,18 @@
     <!-- Thank you overlay -->
     <div id="submitOverlay" class="submit-overlay" style="display: none;">
         <div class="submit-card">
-            <h2>Your answers have been submitted!</h2>
-            <p>You can safely close this page.</p>
+            <h2 id="submitOverlayTitle">Your answers have been submitted!</h2>
+            <p id="submitOverlayMessage">You can safely close this page.</p>
+            <p id="submitOverlayStatus" class="submit-status" style="display: none;"></p>
+        </div>
+    </div>
+
+    <!-- Internet-on lock popup shown during active exam -->
+    <div id="internetLockOverlay" class="submit-overlay network-lock-overlay" style="display: none;">
+        <div class="submit-card network-lock-card">
+            <p class="network-lock-label">Internet Detected</p>
+            <h2>Turn off internet to continue</h2>
+            <p>This exam is strictly offline. You cannot continue until internet is turned off.</p>
         </div>
     </div>
 
@@ -87,13 +100,8 @@
     <script type="module">
 
         import { getExamQuestions, saveStudentAnswer, submitExam } from './js/db.js';
-    </script>
-
-    <footer class="site-footer">
-        Made by Sijomon P S MCA-2025
-    </footer>
         import { initSqlEngine, runQuery } from './js/sqlengine.js';
-        import { initEditor, getEditorContent, setEditorContent } from './js/editor.js';
+        import { initEditor, getEditorContent, setEditorContent, setEditorEditable } from './js/editor.js';
 
         let examId = sessionStorage.getItem('sqlab_examId');
         let studentName = sessionStorage.getItem('sqlab_studentName');
@@ -109,35 +117,543 @@
         let examSubmitted = false;
         let isFinalizing = false;
         let editorReady = false;
+        let pendingSubmission = false;
+        let essentialsLoaded = false;
+        const submissionPendingBadgeText = 'EXAM ENDED-NO CHANGES WILL BE RECORDED FROM NOW';
+
+// Show offline mode indicator
+function showOfflineIndicator(msg) {
+    let ind = document.getElementById('offlineIndicator');
+    if (!ind) {
+        ind = document.createElement('div');
+        ind.id = 'offlineIndicator';
+        ind.className = 'offline-toast';
+        document.body.appendChild(ind);
+    }
+    ind.textContent = msg || 'Offline mode: all changes saved locally.';
+    ind.style.display = 'block';
+    setTimeout(() => { if (ind) ind.style.display = 'none'; }, 2500);
+}
+
+// Show persistent offline mode banner
+function updateOfflineBanner() {
+    let banner = document.getElementById('offlineBanner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'offlineBanner';
+        banner.className = 'offline-banner';
+        banner.textContent = 'Offline Mode: All changes are saved locally and will sync when online.';
+        document.body.appendChild(banner);
+    }
+    banner.style.display = navigator.onLine ? 'none' : 'block';
+}
+
+window.addEventListener('offline', updateOfflineBanner);
+window.addEventListener('online', updateOfflineBanner);
+document.addEventListener('DOMContentLoaded', updateOfflineBanner);
+
+        const examLockPrefix = 'sqlab_exam_locked_';
+        const normalizeStudentKey = (value) => String(value || '').trim().toLowerCase();
+        const lockKeyFor = (targetExamId = examId, targetStudent = studentName) => `${examLockPrefix}${targetExamId}_${normalizeStudentKey(targetStudent)}`;
+        const isExamLocked = () => Boolean(examId && studentName && localStorage.getItem(lockKeyFor()));
+        const setExamLocked = () => {
+            if (!examId || !studentName) return;
+            localStorage.setItem(lockKeyFor(), JSON.stringify({
+                examId,
+                studentName,
+                lockedAt: Date.now()
+            }));
+        };
+
+        const clearExamSession = () => {
+            sessionStorage.removeItem('sqlab_examId');
+            sessionStorage.removeItem('sqlab_studentName');
+            sessionStorage.removeItem('sqlab_examTitle');
+            sessionStorage.removeItem('sqlab_examStartTime');
+            sessionStorage.removeItem('sqlab_examDuration');
+            sessionStorage.removeItem(sessionQuestionsKey);
+        };
+
+        const enterExamFullscreen = async () => {
+            try {
+                if (document.fullscreenElement) return;
+
+                const root = document.documentElement;
+                if (root.requestFullscreen) {
+                    await root.requestFullscreen();
+                } else if (root.webkitRequestFullscreen) {
+                    root.webkitRequestFullscreen();
+                } else if (root.msRequestFullscreen) {
+                    root.msRequestFullscreen();
+                }
+            } catch (err) {
+                console.warn('Fullscreen request was blocked:', err);
+            }
+        };
+
+        const isConnectivityLocked = () => Boolean(examStartTime) && !examSubmitted && !pendingSubmission && navigator.onLine;
+
+        const setExamInteractionsEnabled = (enabled, keepEndExamEnabled = false) => {
+            const shouldDisable = !enabled;
+            document.getElementById('runQueryBtn').disabled = shouldDisable;
+            document.getElementById('nextQuestionBtn').disabled = shouldDisable;
+            document.getElementById('endExamBtn').disabled = keepEndExamEnabled ? false : shouldDisable;
+            document.querySelectorAll('.question-item').forEach(item => {
+                item.disabled = shouldDisable;
+            });
+            setEditorEditable(!shouldDisable);
+        };
+
+        const applyConnectivityLock = (showIndicator = false) => {
+            const lockOverlay = document.getElementById('internetLockOverlay');
+            if (!lockOverlay) return;
+
+            const locked = isConnectivityLocked();
+            lockOverlay.style.display = locked ? 'flex' : 'none';
+
+            if (locked) {
+                // Keep End Exam enabled so students can finalize even while connectivity lock is shown.
+                setExamInteractionsEnabled(false, true);
+                if (showIndicator) {
+                    showOfflineIndicator('Internet detected. Turn it off to continue exam.');
+                }
+                if (document.activeElement && typeof document.activeElement.blur === 'function') {
+                    document.activeElement.blur();
+                }
+                return;
+            }
+
+            if (examStartTime && !examSubmitted && !pendingSubmission) {
+                setExamInteractionsEnabled(true);
+            }
+        };
+
+        const recoveryKey = 'sqlab_exam_recovery_state';
+        const sessionQuestionsKey = 'sqlab_examQuestions';
+        const examPayloadPrefix = 'sqlab_exam_payload_';
 
         const lsKey = () => `sqlab_answers_${examId}_${studentName}`;
+        const payloadKeyFor = (targetExamId = examId) => `${examPayloadPrefix}${targetExamId}`;
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        const normalizeQuestions = (rawQuestions) => {
+            if (!Array.isArray(rawQuestions)) return [];
+            return rawQuestions
+                .map(q => String(q ?? '').trim())
+                .filter(q => q.length > 0);
+        };
+
+        const readSessionQuestions = () => {
+            try {
+                const raw = sessionStorage.getItem(sessionQuestionsKey);
+                if (!raw) return [];
+                return normalizeQuestions(JSON.parse(raw));
+            } catch (err) {
+                console.warn('Could not parse session questions:', err);
+                return [];
+            }
+        };
+
+        const readCachedExamPayload = (targetExamId = examId) => {
+            if (!targetExamId) return null;
+
+            try {
+                const raw = localStorage.getItem(payloadKeyFor(targetExamId));
+                if (!raw) return null;
+
+                const parsed = JSON.parse(raw);
+                if (!parsed || typeof parsed !== 'object') return null;
+
+                const durationMinutes = parseInt(parsed.durationMinutes, 10);
+                return {
+                    id: parsed.id || targetExamId,
+                    title: parsed.title || '',
+                    durationMinutes: Number.isFinite(durationMinutes) && durationMinutes > 0 ? durationMinutes : null,
+                    questions: normalizeQuestions(parsed.questions),
+                    cachedAt: parsed.cachedAt || null
+                };
+            } catch (err) {
+                console.warn('Could not parse cached exam payload:', err);
+                return null;
+            }
+        };
+
+        const applyCachedExamPayload = (payload) => {
+            if (!payload) return;
+
+            if (!examTitle && payload.title) {
+                examTitle = payload.title;
+                sessionStorage.setItem('sqlab_examTitle', examTitle);
+            }
+
+            if (payload.durationMinutes) {
+                examDuration = payload.durationMinutes;
+                sessionStorage.setItem('sqlab_examDuration', String(payload.durationMinutes));
+            }
+
+            if (payload.questions.length > 0) {
+                sessionStorage.setItem(sessionQuestionsKey, JSON.stringify(payload.questions));
+            }
+        };
+
+        const persistExamPayload = ({ id, title, durationMinutes, questions: questionList }) => {
+            if (!id) return;
+
+            const normalizedQuestions = normalizeQuestions(questionList);
+            if (normalizedQuestions.length > 0) {
+                sessionStorage.setItem(sessionQuestionsKey, JSON.stringify(normalizedQuestions));
+            }
+
+            const normalizedDuration = parseInt(durationMinutes, 10);
+            const safeDuration = Number.isFinite(normalizedDuration) && normalizedDuration > 0
+                ? normalizedDuration
+                : (parseInt(sessionStorage.getItem('sqlab_examDuration'), 10) || 60);
+
+            localStorage.setItem(payloadKeyFor(id), JSON.stringify({
+                id,
+                title: title || examTitle || 'Exam',
+                durationMinutes: safeDuration,
+                questions: normalizedQuestions,
+                cachedAt: Date.now()
+            }));
+        };
+
+        const resolveQuestionsForExam = async () => {
+            const sessionQuestions = readSessionQuestions();
+            if (sessionQuestions.length > 0) {
+                return sessionQuestions;
+            }
+
+            const cachedPayload = readCachedExamPayload(examId);
+            if (cachedPayload?.questions?.length) {
+                applyCachedExamPayload(cachedPayload);
+                return cachedPayload.questions;
+            }
+
+            try {
+                const fetchedQuestions = normalizeQuestions(await getExamQuestions(examId));
+                if (fetchedQuestions.length > 0) {
+                    persistExamPayload({
+                        id: examId,
+                        title: examTitle,
+                        durationMinutes: examDuration,
+                        questions: fetchedQuestions
+                    });
+                }
+                return fetchedQuestions;
+            } catch (err) {
+                const fallbackPayload = readCachedExamPayload(examId);
+                if (fallbackPayload?.questions?.length) {
+                    applyCachedExamPayload(fallbackPayload);
+                    return fallbackPayload.questions;
+                }
+                throw err;
+            }
+        };
+
+        const readRecoveryState = () => {
+            try {
+                const raw = localStorage.getItem(recoveryKey);
+                return raw ? JSON.parse(raw) : null;
+            } catch (err) {
+                console.warn('Could not parse recovery state:', err);
+                return null;
+            }
+        };
+
+        const restoreSessionFromRecovery = () => {
+            const state = readRecoveryState();
+            if (!state?.examId || !state?.studentName) return false;
+
+            sessionStorage.setItem('sqlab_examId', state.examId);
+            sessionStorage.setItem('sqlab_studentName', state.studentName);
+            if (state.examTitle) sessionStorage.setItem('sqlab_examTitle', state.examTitle);
+            if (Number.isFinite(parseInt(state.examDuration, 10))) {
+                sessionStorage.setItem('sqlab_examDuration', String(parseInt(state.examDuration, 10)));
+            }
+
+            const restoredStart = parseInt(state.examStartTime, 10);
+            if (Number.isFinite(restoredStart) && restoredStart > 0) {
+                sessionStorage.setItem('sqlab_examStartTime', String(restoredStart));
+            }
+
+            examId = sessionStorage.getItem('sqlab_examId');
+            studentName = sessionStorage.getItem('sqlab_studentName');
+            examTitle = sessionStorage.getItem('sqlab_examTitle');
+            return true;
+        };
+
+        const persistRecoveryState = (overrides = {}) => {
+            if (!examId || !studentName) return;
+
+            const next = {
+                examId,
+                studentName,
+                examTitle,
+                examDuration,
+                examStartTime,
+                currentQuestionIndex,
+                pendingSubmission,
+                updatedAt: Date.now(),
+                ...overrides
+            };
+
+            localStorage.setItem(recoveryKey, JSON.stringify(next));
+        };
+
+        const clearRecoveryState = () => {
+            localStorage.removeItem(recoveryKey);
+        };
+
+        const setSubmitOverlay = (title, message, status = '', waiting = false) => {
+            document.getElementById('submitOverlay').style.display = 'flex';
+
+            document.getElementById('submitOverlayTitle').textContent = title;
+            document.getElementById('submitOverlayMessage').textContent = message;
+
+            const statusEl = document.getElementById('submitOverlayStatus');
+            if (status) {
+                statusEl.textContent = status;
+                statusEl.style.display = 'block';
+                statusEl.classList.toggle('waiting', waiting);
+            } else {
+                statusEl.style.display = 'none';
+                statusEl.classList.remove('waiting');
+            }
+        };
+
+        const setBeginStatus = (message = '') => {
+            const statusEl = document.getElementById('beginExamStatus');
+            if (!message) {
+                statusEl.style.display = 'none';
+                statusEl.textContent = '';
+                return;
+            }
+
+            statusEl.textContent = message;
+            statusEl.style.display = 'block';
+        };
+
+        const setSubmissionPendingBadge = (visible) => {
+            const badgeEl = document.getElementById('submissionPendingBadge');
+            if (!badgeEl) return;
+
+            badgeEl.textContent = submissionPendingBadgeText;
+            badgeEl.hidden = !visible;
+        };
+
+        const hasInternetConnection = async () => {
+            if (!navigator.onLine) return false;
+
+            try {
+                await fetch(`https://www.gstatic.com/generate_204?ts=${Date.now()}`, {
+                    method: 'GET',
+                    mode: 'no-cors',
+                    cache: 'no-store'
+                });
+                return true;
+            } catch {
+                return false;
+            }
+        };
+
+        const waitForInternetSignal = async () => {
+            await new Promise((resolve) => {
+                let resolved = false;
+
+                const done = () => {
+                    if (resolved) return;
+                    resolved = true;
+                    window.removeEventListener('online', onOnline);
+                    clearTimeout(timeout);
+                    resolve();
+                };
+
+                const onOnline = () => done();
+                const timeout = setTimeout(done, 5000);
+                window.addEventListener('online', onOnline);
+            });
+        };
+
+        const disableExamInteractions = () => {
+            setExamInteractionsEnabled(false);
+            // Show overlay if exam is submitted or pending
+            if (examSubmitted || pendingSubmission) {
+                showOfflineIndicator('Exam submitted or pending. Navigation disabled.');
+            }
+        };
+
+        const markSubmissionComplete = () => {
+            examSubmitted = true;
+            pendingSubmission = false;
+            setSubmissionPendingBadge(false);
+
+            clearRecoveryState();
+            localStorage.removeItem(lsKey());
+            clearExamSession();
+
+            disableExamInteractions();
+        };
+
+        const sendSubmissionWhenOnline = async () => {
+            setSubmissionPendingBadge(true);
+            setSubmitOverlay(
+                'Submitting your exam...',
+                'Waiting for internet connection to send the submission to the examiner.',
+                'Please keep this page open.',
+                true
+            );
+
+            while (true) {
+                const hasInternet = await hasInternetConnection();
+                if (!hasInternet) {
+                    setSubmissionPendingBadge(true);
+                    setSubmitOverlay(
+                        'Submitting your exam...',
+                        'Waiting for internet connection to send the submission to the examiner.',
+                        'No internet detected. We will auto-send once connection returns.',
+                        true
+                    );
+                    await waitForInternetSignal();
+                    continue;
+                }
+
+                try {
+                    setSubmissionPendingBadge(true);
+                    setSubmitOverlay(
+                        'Submitting your exam...',
+                        'Internet detected. Sending submission to examiner.',
+                        'Sending now...',
+                        true
+                    );
+
+                    await submitExam(examId, studentName);
+                    break;
+                } catch (err) {
+                    console.warn('Submission retry after error:', err);
+                    const errorCode = err?.code || '';
+                    const isPermissionIssue = errorCode === 'permission-denied' || errorCode === 'unauthenticated';
+                    setSubmissionPendingBadge(true);
+
+                    setSubmitOverlay(
+                        'Submitting your exam...',
+                        isPermissionIssue
+                            ? 'Submission permission issue detected. Please contact examiner.'
+                            : 'Could not send submission right now.',
+                        isPermissionIssue
+                            ? 'Retrying automatically. Keep this page open.'
+                            : 'Retrying automatically in 3 seconds...',
+                        true
+                    );
+                    await sleep(3000);
+                }
+            }
+
+            markSubmissionComplete();
+
+            setSubmitOverlay(
+                `THank you for attenting the exam ${studentName}`,
+                'Your submission has been sent successfully.',
+                '',
+                false
+            );
+        };
 
         const init = async () => {
+            if ((!examId || !studentName) && !restoreSessionFromRecovery()) {
+                alert("Missing session details. Please login again.");
+                window.location.href = 'index.html';
+                return;
+            }
+
+            setSubmissionPendingBadge(false);
+
+            examId = sessionStorage.getItem('sqlab_examId');
+            studentName = sessionStorage.getItem('sqlab_studentName');
+            examTitle = sessionStorage.getItem('sqlab_examTitle');
+
+            const recovery = readRecoveryState();
+            if (recovery && recovery.examId === examId && recovery.studentName === studentName) {
+                if (!examTitle && recovery.examTitle) {
+                    examTitle = recovery.examTitle;
+                    sessionStorage.setItem('sqlab_examTitle', examTitle);
+                }
+
+                const recoveredDuration = parseInt(recovery.examDuration, 10);
+                if (Number.isFinite(recoveredDuration) && recoveredDuration > 0) {
+                    examDuration = recoveredDuration;
+                }
+
+                const recoveredStart = parseInt(recovery.examStartTime, 10);
+                if (Number.isFinite(recoveredStart) && recoveredStart > 0) {
+                    examStartTime = recoveredStart;
+                    sessionStorage.setItem('sqlab_examStartTime', String(recoveredStart));
+                }
+
+                const recoveredIndex = parseInt(recovery.currentQuestionIndex, 10);
+                if (Number.isFinite(recoveredIndex) && recoveredIndex >= 0) {
+                    currentQuestionIndex = recoveredIndex;
+                }
+
+                pendingSubmission = Boolean(recovery.pendingSubmission);
+            }
+
+            // Only show badge if pendingSubmission is true and exam is not already submitted
+            setSubmissionPendingBadge(pendingSubmission && !examSubmitted);
+
+            const cachedPayload = readCachedExamPayload(examId);
+            if (cachedPayload) {
+                applyCachedExamPayload(cachedPayload);
+            }
+
             if (!examId || !studentName) {
                 alert("Missing session details. Please login again.");
                 window.location.href = 'index.html';
                 return;
             }
 
+            // Prevent re-access after the student has ended this exam.
+            if (isExamLocked() && !pendingSubmission) {
+                clearExamSession();
+                alert('This exam has already been ended. Re-entry is not allowed.');
+                window.location.href = 'index.html';
+                return;
+            }
+
+            examTitle = examTitle || 'Exam';
             document.getElementById('examTitleDisplay').textContent = examTitle;
             document.getElementById('studentNameDisplay').textContent = studentName;
             
             // Get exam duration and start time from session
-            examDuration = parseInt(sessionStorage.getItem('sqlab_examDuration')) || 60;
+            examDuration = parseInt(sessionStorage.getItem('sqlab_examDuration'), 10) || examDuration || 60;
             const persistedStart = parseInt(sessionStorage.getItem('sqlab_examStartTime'), 10);
-            examStartTime = Number.isFinite(persistedStart) && persistedStart > 0 ? persistedStart : null;
+            if (Number.isFinite(persistedStart) && persistedStart > 0) {
+                examStartTime = persistedStart;
+            }
+
+            persistRecoveryState();
             
             try {
-                
-                // Fetch Questions
-                questions = await getExamQuestions(examId);
+                essentialsLoaded = false;
+
+                // Resolve questions from session/local cache first, then network as fallback.
+                questions = await resolveQuestionsForExam();
                 document.getElementById('totalQuestions').textContent = questions.length;
                 answersObj = JSON.parse(localStorage.getItem(lsKey()) || '{}');
                 
                 if (questions.length === 0) {
-                    document.getElementById('questionText').textContent = "No questions found for this exam.";
+                    showError("Questions are unavailable. Please reconnect to internet once to preload this exam.");
                     return;
                 }
+
+                persistExamPayload({
+                    id: examId,
+                    title: examTitle,
+                    durationMinutes: examDuration,
+                    questions
+                });
+
+                currentQuestionIndex = Math.max(0, Math.min(currentQuestionIndex, questions.length - 1));
                 
                 // Initialize SQL Engine
                 const sqlReady = await initSqlEngine();
@@ -148,11 +664,20 @@
                 
                 // Initialize Editor
                 // Wait briefly for CSS to apply to container
-                setTimeout(() => {
+                setTimeout(async () => {
                     initEditor('editorContainer', 'SELECT * FROM employees;');
                     editorReady = true;
                     renderQuestionList();
-                    loadQuestion(0);
+                    loadQuestion(currentQuestionIndex);
+                    essentialsLoaded = true;
+
+                    if (pendingSubmission) {
+                        clearInterval(timerInterval);
+                        clearInterval(autoSaveInterval);
+                        disableExamInteractions();
+                        await sendSubmissionWhenOnline();
+                        return;
+                    }
 
                     if (examStartTime) {
                         beginExamSession(true);
@@ -163,7 +688,7 @@
 
             } catch (err) {
                 console.error("Initialization error:", err);
-                showError("Initialization failed. Check internet connection for first load.");
+                showError("Initialization failed. Connect once to preload exam resources, then retry.");
             }
         };
 
@@ -172,6 +697,11 @@
             document.getElementById('welcomeExamName').textContent = examTitle;
             document.getElementById('welcomeExamDuration').textContent = `${examDuration} minutes`;
             document.getElementById('welcomeOverlay').style.display = 'flex';
+            if (navigator.onLine) {
+                setBeginStatus('All required resources are loaded. Please turn off internet connection, then click Begin Exam.');
+            } else {
+                setBeginStatus('');
+            }
         };
 
         const beginExamSession = (isResume = false) => {
@@ -180,9 +710,14 @@
                 sessionStorage.setItem('sqlab_examStartTime', examStartTime);
             }
 
+            // Try fullscreen whenever exam is active. Browsers may ignore this without user gesture.
+            enterExamFullscreen();
+
             if (!timerInterval) startTimer();
             if (!autoSaveInterval) startAutoSave();
             document.getElementById('welcomeOverlay').style.display = 'none';
+            persistRecoveryState();
+            applyConnectivityLock(false);
         };
 
         const renderQuestionList = () => {
@@ -225,7 +760,11 @@
         };
 
         const selectQuestion = async (index) => {
-            if (index === currentQuestionIndex || examSubmitted || !editorReady) return;
+            if (isConnectivityLocked()) {
+                applyConnectivityLock(true);
+                return;
+            }
+            if (index === currentQuestionIndex || examSubmitted || pendingSubmission || !editorReady) return;
             await saveCurrentAnswer();
             loadQuestion(index);
         };
@@ -244,6 +783,7 @@
             }
 
             refreshQuestionListState();
+            persistRecoveryState();
             
             // Clear outputs
             document.getElementById('tableDisplay').innerHTML = '';
@@ -261,17 +801,24 @@
         };
 
         const saveCurrentAnswer = async () => {
-            if (!editorReady || examSubmitted) return;
+            if (!editorReady || examSubmitted || pendingSubmission) return;
 
             const sql = getEditorContent();
             answersObj[currentQuestionIndex] = sql;
             localStorage.setItem(lsKey(), JSON.stringify(answersObj));
             refreshQuestionListState();
+            persistRecoveryState();
 
-            try {
-                await saveStudentAnswer(examId, studentName, currentQuestionIndex, sql);
-            } catch (err) {
-                console.warn('Save deferred by browser/offline cache:', err);
+            // Always allow local save, but try remote if online
+            if (navigator.onLine) {
+                try {
+                    await saveStudentAnswer(examId, studentName, currentQuestionIndex, sql);
+                } catch (err) {
+                    showOfflineIndicator('Save will sync when online.');
+                    console.warn('Save deferred by browser/offline cache:', err);
+                }
+            } else {
+                showOfflineIndicator('Offline: answer saved locally.');
             }
         };
 
@@ -310,7 +857,7 @@
 
                 if (remaining <= 0) {
                     clearInterval(timerInterval);
-                    finalizeExam('Time\'s Up!', 'Your exam has been automatically submitted.');
+                    finalizeExam();
                 }
             };
 
@@ -342,29 +889,51 @@
             try {
                 clearInterval(timerInterval);
                 clearInterval(autoSaveInterval);
+                timerInterval = null;
+                autoSaveInterval = null;
 
                 await saveCurrentAnswer();
                 await saveAllEnteredAnswers();
-                await submitExam(examId, studentName);
 
-                examSubmitted = true;
-                document.getElementById('submitOverlay').style.display = 'flex';
-                document.getElementById('submitOverlay').querySelector('h2').textContent = title;
-                document.getElementById('submitOverlay').querySelector('p').textContent = message;
+                setExamLocked();
+                pendingSubmission = true;
+                setSubmissionPendingBadge(true);
+                persistRecoveryState();
+                disableExamInteractions();
+                applyConnectivityLock(false);
 
-                sessionStorage.removeItem('sqlab_examId');
-                sessionStorage.removeItem('sqlab_studentName');
-                sessionStorage.removeItem('sqlab_examStartTime');
-
-                document.getElementById('runQueryBtn').disabled = true;
-                document.getElementById('nextQuestionBtn').disabled = true;
-                document.getElementById('endExamBtn').disabled = true;
+                if (navigator.onLine) {
+                    await sendSubmissionWhenOnline();
+                } else {
+                    // Mark as submitted locally, show message, auto-send when online
+                    showOfflineIndicator('Exam submission saved locally. Will sync when online.');
+                    setSubmitOverlay(
+                        'Exam submission saved locally!',
+                        'You are offline. Your answers are safe and will be submitted automatically when internet returns.',
+                        'Keep this page open until you see confirmation.',
+                        true
+                    );
+                    // Listen for online event to auto-send
+                    const trySend = async () => {
+                        if (navigator.onLine && pendingSubmission) {
+                            await sendSubmissionWhenOnline();
+                            window.removeEventListener('online', trySend);
+                        }
+                    };
+                    window.addEventListener('online', trySend);
+                }
             } finally {
                 isFinalizing = false;
             }
         };
 
         const executeQueryClick = () => {
+            if (isConnectivityLocked()) {
+                applyConnectivityLock(true);
+                return;
+            }
+            if (examSubmitted || pendingSubmission) return;
+
             const sql = getEditorContent();
             if (!sql.trim()) return;
             
@@ -407,21 +976,86 @@
         };
 
         const nextQuestionClick = async () => {
+            if (isConnectivityLocked()) {
+                applyConnectivityLock(true);
+                return;
+            }
+            if (examSubmitted || pendingSubmission) return;
             await saveCurrentAnswer();
             loadQuestion(getNextQuestionIndex());
         };
 
         const endExamClick = async () => {
-            if (examSubmitted) return;
+            if (examSubmitted || pendingSubmission || isFinalizing) return;
 
             const confirmed = confirm('Are you sure you want to end the exam now? All entered answers will be saved and submitted.');
             if (!confirmed) return;
 
-            await finalizeExam('Exam Submitted', 'Your entered answers were saved and submitted successfully.');
+            // Show badge immediately for user feedback
+            setSubmissionPendingBadge(true);
+            await finalizeExam();
         };
 
+        const beginExamClick = async () => {
+            if (examSubmitted || pendingSubmission) return;
+
+            if (!essentialsLoaded) {
+                setBeginStatus('Preparing exam resources. Please wait a few seconds and try again.');
+                return;
+            }
+
+            const beginBtn = document.getElementById('beginExamBtn');
+            beginBtn.disabled = true;
+            beginBtn.textContent = 'Checking connection...';
+            setBeginStatus('');
+
+            const hasInternet = await hasInternetConnection();
+            if (hasInternet) {
+                beginBtn.disabled = false;
+                beginBtn.textContent = 'Begin Exam';
+                setBeginStatus('Resources are ready. Please turn off internet connection to begin the exam in offline mode.');
+                return;
+            }
+
+            beginBtn.disabled = false;
+            beginBtn.textContent = 'Begin Exam';
+            beginExamSession(false);
+        };
+
+        window.addEventListener('online', () => {
+            if (!examStartTime && !examSubmitted && !pendingSubmission) {
+                setBeginStatus('Please turn off internet connection to begin the exam in offline mode.');
+            }
+            applyConnectivityLock(true);
+        });
+        window.addEventListener('offline', () => {
+            setBeginStatus('');
+            applyConnectivityLock(false);
+            // Ensure End Exam button is enabled if exam is in progress
+            if (examStartTime && !examSubmitted && !pendingSubmission) {
+                setExamInteractionsEnabled(true);
+            }
+        });
+
+        window.addEventListener('keydown', (event) => {
+            if (!isConnectivityLocked()) return;
+            event.preventDefault();
+            event.stopPropagation();
+        }, true);
+
+        window.addEventListener('beforeunload', () => {
+            if (!editorReady || examSubmitted || pendingSubmission) return;
+            try {
+                answersObj[currentQuestionIndex] = getEditorContent();
+                localStorage.setItem(lsKey(), JSON.stringify(answersObj));
+                persistRecoveryState();
+            } catch (err) {
+                console.warn('Could not persist before unload:', err);
+            }
+        });
+
         // Attach events
-        document.getElementById('beginExamBtn').addEventListener('click', () => beginExamSession(false));
+        document.getElementById('beginExamBtn').addEventListener('click', beginExamClick);
         document.getElementById('runQueryBtn').addEventListener('click', executeQueryClick);
         document.getElementById('nextQuestionBtn').addEventListener('click', nextQuestionClick);
         document.getElementById('endExamBtn').addEventListener('click', endExamClick);
@@ -429,5 +1063,9 @@
         // Bootstrap
         init();
     </script>
+
+    <footer class="site-footer">
+        Made by Sijomon P S MCA-202-27
+    </footer>
 </body>
 </html>

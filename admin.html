@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SQLab - Examiner Dashboard</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=20260328-4">
 </head>
 <body class="admin-bg">
     <!-- Navigation -->
@@ -44,38 +44,26 @@
 
             <!-- Manage Exams Tab -->
             <div id="manageTab" class="tab-content active">
-                <div class="card p-4 mb-4">
-                    <h3>Create New Exam</h3>
-                    <form id="createExamForm">
-                        <div class="form-group">
-                            <label>Exam Title</label>
-                            <input type="text" id="newExamTitle" required class="form-control">
-                        </div>
-                        <div class="form-group">
-                            <label>Exam Password (for students to enter)</label>
-                            <input type="text" id="newExamPassword" required class="form-control">
-                        </div>
-                        <div class="form-group">
-                            <label>Duration (minutes)</label>
-                            <input type="number" id="newExamDuration" required class="form-control" value="60" min="1">
-                        </div>
-                        
-                        <h4>Questions</h4>
-                        <div id="questionsContainer">
-                            <div class="form-group question-row">
-                                <label>Q1</label>
-                                <textarea class="form-control q-input" rows="3" required></textarea>
-                            </div>
-                        </div>
-                        <button type="button" id="addQuestionBtn" class="btn btn-secondary btn-sm mb-3">+ Add Another Question</button>
-                        <br>
-                        <button type="submit" class="btn btn-primary">Save Exam</button>
-                    </form>
+                <div class="card p-4 mb-4 manage-header-card">
+                    <div>
+                        <h3>Manage Exams</h3>
+                        <p class="text-muted manage-subtitle">All exams are listed with core details and quick actions.</p>
+                    </div>
+                    <button type="button" id="openAddExamModalBtn" class="btn add-exam-plus-btn" title="Add New Exam" aria-label="Add New Exam">+</button>
                 </div>
-                
-                <h4>Created Exams</h4>
-                <div id="examsList" class="exam-list">
-                    <!-- Loaded dynamically -->
+
+                <div class="card p-4">
+                    <div class="exam-list-grid exam-list-head-row">
+                        <div>Title</div>
+                        <div>Password</div>
+                        <div>Duration</div>
+                        <div>No. of Questions</div>
+                        <div>Created Date</div>
+                        <div class="exam-actions-col">Actions</div>
+                    </div>
+                    <div id="examsList" class="exam-list">
+                        <!-- Loaded dynamically -->
+                    </div>
                 </div>
             </div>
 
@@ -121,6 +109,45 @@
         </div>
     </div>
 
+    <!-- Add Exam Modal -->
+    <div id="addExamModal" class="submit-overlay" style="display: none;">
+        <div class="submit-card text-left add-exam-modal-card">
+            <div class="add-exam-modal-header">
+                <h2>Add New Exam</h2>
+                <p class="text-muted">Simple setup: title, password, duration, and questions.</p>
+            </div>
+
+            <form id="createExamForm">
+                <div class="form-group">
+                    <label>Exam Title</label>
+                    <input type="text" id="newExamTitle" required class="form-control" placeholder="e.g. SQL Basics Midterm">
+                </div>
+                <div class="form-group">
+                    <label>Exam Password</label>
+                    <input type="text" id="newExamPassword" required class="form-control" placeholder="Students will use this to join">
+                </div>
+                <div class="form-group">
+                    <label>Duration (minutes)</label>
+                    <input type="number" id="newExamDuration" required class="form-control" value="60" min="1">
+                </div>
+
+                <h4 style="margin-bottom: 10px;">Questions</h4>
+                <div id="questionsContainer" class="add-question-list">
+                    <div class="form-group question-row">
+                        <label>Q1</label>
+                        <textarea class="form-control q-input" rows="3" required placeholder="Write question 1"></textarea>
+                    </div>
+                </div>
+                <button type="button" id="addQuestionBtn" class="btn btn-secondary btn-sm mb-3">+ Add Question</button>
+
+                <div class="add-exam-actions">
+                    <button type="submit" id="saveExamBtn" class="btn btn-primary">Save Exam</button>
+                    <button type="button" id="closeAddExamModal" class="btn btn-secondary">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Edit Exam Modal -->
     <div id="editExamModal" class="submit-overlay" style="display: none;">
         <div class="submit-card text-left" style="min-width: 600px; max-height: 90vh; overflow-y: auto;">
@@ -158,7 +185,7 @@
     <script type="module">
 
         import { signInEmail, signOutAdmin, authStateObserver, updateAdminPassword } from './js/auth.js';
-        import { createExam, getExamsList, getSubmissionsForExam, saveMarks, getExamQuestions, updateExam, updateExamQuestions, getFullExamDetails, deleteExam } from './js/db.js';
+        import { createExam, getExamsList, getSubmissionsForExam, saveMarks, getExamQuestions, updateExam, updateExamQuestions, deleteExam } from './js/db.js';
         import { createReadOnlyEditor } from './js/editor.js';
 
         let currentAdmin = null;
@@ -394,7 +421,8 @@
         const handleDeleteExam = async (examId) => {
             try {
                 await deleteExam(examId);
-                loadExams();
+                await loadExams();
+                await populateExamSelect();
             } catch (err) {
                 alert('Error deleting exam: ' + err.message);
             }
@@ -416,108 +444,152 @@
             });
         });
 
-        // Add question field
+        const buildQuestionRowTemplate = (qNumber) => `
+            <div class="form-group question-row">
+                <label>Q${qNumber}</label>
+                <textarea class="form-control q-input" rows="3" required placeholder="Write question ${qNumber}"></textarea>
+            </div>
+        `;
+
+        // Add exam modal and question field
         let qCount = 1;
+        const addExamModal = document.getElementById('addExamModal');
+        const createExamForm = document.getElementById('createExamForm');
+
+        const resetCreateExamForm = () => {
+            createExamForm.reset();
+            document.getElementById('newExamDuration').value = '60';
+            document.getElementById('questionsContainer').innerHTML = buildQuestionRowTemplate(1);
+            qCount = 1;
+        };
+
+        const closeAddExamModal = () => {
+            addExamModal.style.display = 'none';
+        };
+
+        document.getElementById('openAddExamModalBtn').addEventListener('click', () => {
+            resetCreateExamForm();
+            addExamModal.style.display = 'flex';
+        });
+
+        document.getElementById('closeAddExamModal').addEventListener('click', () => {
+            closeAddExamModal();
+        });
+
+        addExamModal.addEventListener('click', (e) => {
+            if (e.target === addExamModal) {
+                closeAddExamModal();
+            }
+        });
+
         document.getElementById('addQuestionBtn').addEventListener('click', () => {
             qCount++;
-            const div = document.createElement('div');
-            div.className = 'form-group question-row';
-            div.innerHTML = `
-                <label>Q${qCount}</label>
-                <textarea class="form-control q-input" rows="3" required></textarea>
-            `;
-            document.getElementById('questionsContainer').appendChild(div);
+            document.getElementById('questionsContainer').insertAdjacentHTML('beforeend', buildQuestionRowTemplate(qCount));
         });
 
         // Create exam form
-        document.getElementById('createExamForm').addEventListener('submit', async (e) => {
+        createExamForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const title = document.getElementById('newExamTitle').value;
             const pwd = document.getElementById('newExamPassword').value;
             const duration = document.getElementById('newExamDuration').value;
             const qInputs = document.querySelectorAll('.q-input');
             const questions = Array.from(qInputs).map(i => i.value.trim()).filter(q => q.length > 0);
-            
+
+            if (questions.length === 0) {
+                alert('Please add at least one question.');
+                return;
+            }
+
+            const btn = document.getElementById('saveExamBtn');
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+
             try {
-                const btn = e.target.querySelector('button[type="submit"]');
-                btn.disabled = true;
-                btn.textContent = 'Saving...';
-                
                 await createExam(title, pwd, questions, duration);
-                
-                alert("Exam created successfully!");
-                e.target.reset();
-                document.getElementById('newExamDuration').value = '60';
-                // clear extra questions
-                document.getElementById('questionsContainer').innerHTML = `
-                    <div class="form-group question-row">
-                        <label>Q1</label>
-                        <textarea class="form-control q-input" rows="3" required></textarea>
-                    </div>`;
-                qCount = 1;
-                loadExams();
+                resetCreateExamForm();
+                closeAddExamModal();
+                await loadExams();
+                await populateExamSelect();
+            } catch (err) {
+                alert('Error creating exam: ' + err.message);
+            } finally {
                 btn.disabled = false;
                 btn.textContent = 'Save Exam';
-            } catch (err) {
-                alert("Error creating exam: " + err.message);
-                e.target.querySelector('button[type="submit"]').disabled = false;
-                e.target.querySelector('button[type="submit"]').textContent = 'Save Exam';
             }
         });
+
+        const escapeHtml = (value) => String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+
+        const formatExamDate = (createdAt) => {
+            if (!createdAt) return 'Unknown';
+            const dateObj = createdAt.toDate ? createdAt.toDate() : new Date(createdAt);
+            if (Number.isNaN(dateObj.getTime())) return 'Unknown';
+            return dateObj.toLocaleString();
+        };
 
         const loadExams = async () => {
             exams = await getExamsList();
             const listDiv = document.getElementById('examsList');
+
             if (exams.length === 0) {
-                listDiv.innerHTML = '<p class="text-muted">No exams created yet.</p>';
+                listDiv.innerHTML = '<div class="empty-exam-list">No exams created yet. Click + to add a new exam.</div>';
                 return;
             }
-            
-            let html = '';
-            exams.forEach(ex => {
-                // Formatting creation date roughly
-                let dStr = 'Unknown date';
-                if(ex.createdAt) {
-                    const d = ex.createdAt.toDate ? ex.createdAt.toDate() : new Date();
-                    dStr = d.toLocaleString();
-                }
+
+            const rows = exams.map(ex => {
+                const dStr = formatExamDate(ex.createdAt);
                 const duration = ex.durationMinutes || 60;
-                
-                html += `
-                <div class="card p-4 mb-3" style="background:var(--bg-main)">
-                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
-                        <div>
-                            <h5 style="margin-bottom:10px">${ex.title}</h5>
-                            <p style="margin:5px 0"><strong>Password:</strong> <span style="color:var(--kw-color)">${ex.password}</span></p>
-                            <p style="margin:5px 0"><strong>Duration:</strong> ${duration} minutes</p>
-                            <p style="margin:5px 0; font-size:0.9rem">Questions: ${ex.questions ? ex.questions.length : 0}</p>
-                            <p style="margin:5px 0; font-size:0.8rem" class="text-muted">Created: ${dStr}</p>
-                        </div>
-                        <div>
-                            <button class="btn btn-info btn-sm edit-exam-btn" data-exam-id="${ex.id}" style="margin-bottom: 5px; width: 80px;">Edit</button>
-                            <button class="btn btn-danger btn-sm delete-exam-btn" data-exam-id="${ex.id}" style="width: 80px;">Delete</button>
+                const questionCount = ex.questions ? ex.questions.length : 0;
+
+                return `
+                    <div class="exam-list-grid exam-list-row">
+                        <div class="exam-cell" data-label="Title">${escapeHtml(ex.title || '-')}</div>
+                        <div class="exam-cell exam-cell-password" data-label="Password">${escapeHtml(ex.password || '-')}</div>
+                        <div class="exam-cell" data-label="Duration">${duration} min</div>
+                        <div class="exam-cell" data-label="No. of Questions">${questionCount}</div>
+                        <div class="exam-cell" data-label="Created Date">${escapeHtml(dStr)}</div>
+                        <div class="exam-cell exam-actions-cell" data-label="Actions">
+                            <div class="exam-row-actions">
+                                <button type="button" class="icon-btn edit-exam-btn" data-exam-id="${ex.id}" aria-label="Edit exam">
+                                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <path d="M4 20h4l10-10-4-4L4 16v4zM14 6l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                </button>
+                                <button type="button" class="icon-btn danger delete-exam-btn" data-exam-id="${ex.id}" aria-label="Delete exam">
+                                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <path d="M4 7h16M9 7V5h6v2m-7 0v12m4-12v12m4-12v12M6 7l1 13h10l1-13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
                 `;
             });
-            listDiv.innerHTML = html;
-            
-            // Attach event listeners
+
+            listDiv.innerHTML = rows.join('');
+
             document.querySelectorAll('.edit-exam-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
-                    const examId = e.target.getAttribute('data-exam-id');
+                    const examId = e.currentTarget.getAttribute('data-exam-id');
                     const exam = exams.find(ex => ex.id === examId);
-                    openEditExamModal(exam);
+                    if (exam) {
+                        openEditExamModal(exam);
+                    }
                 });
             });
-            
+
             document.querySelectorAll('.delete-exam-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const examId = e.target.getAttribute('data-exam-id');
-                    if (confirm('Are you sure you want to delete this exam?')) {
-                        handleDeleteExam(examId);
-                    }
+                btn.addEventListener('click', async (e) => {
+                    const examId = e.currentTarget.getAttribute('data-exam-id');
+                    const ok = confirm('Delete this exam? This will also delete all students who attended and their submissions.');
+                    if (!ok) return;
+                    await handleDeleteExam(examId);
                 });
             });
         };
@@ -655,9 +727,18 @@
             
             const answersList = content.querySelector('#detail-answers-list');
             const marksArr = sub.marks || [];
+
+            const getAnswerForIndex = (answers, qIndex) => {
+                if (!answers) return '';
+                if (Array.isArray(answers)) return answers[qIndex] || '';
+                if (typeof answers === 'object') {
+                    return answers[qIndex] || answers[String(qIndex)] || '';
+                }
+                return '';
+            };
             
             selectedExamQuestions.forEach((q, qIndex) => {
-                const answerText = (sub.answers && sub.answers[qIndex]) ? sub.answers[qIndex] : '-- No answer submitted --';
+                const answerText = getAnswerForIndex(sub.answers, qIndex) || '-- No answer submitted --';
                 const mark = marksArr[qIndex] !== undefined && marksArr[qIndex] !== null ? marksArr[qIndex] : '';
                 
                 const block = document.createElement('div');
@@ -707,10 +788,9 @@
         // Bootstrap
         init();
     </script>
-</script>
 
     <footer class="site-footer">
-        Made by Sijomon P S MCA-2025
+        Made by Sijomon P S MCA-202-27
     </footer>
 </body>
 </html>

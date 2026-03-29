@@ -1,5 +1,5 @@
 import { 
-    collection, doc, getDocs, getDoc, setDoc, query, where, addDoc, serverTimestamp, updateDoc
+    collection, doc, getDocs, getDoc, setDoc, query, where, addDoc, serverTimestamp, updateDoc, waitForPendingWrites, deleteDoc, writeBatch, getDocsFromServer
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { db } from './config.js';
 
@@ -7,20 +7,51 @@ import { db } from './config.js';
 
 // Verify exam password and return exam info if correct
 export async function verifyExamPassword(password) {
+    const normalizedPassword = String(password || '').trim();
+    if (!normalizedPassword) {
+        return null;
+    }
 
     const examsRef = collection(db, 'exams');
-    const q = query(examsRef, where('password', '==', password));
-    const querySnapshot = await getDocs(q);
+    const q = query(examsRef, where('password', '==', normalizedPassword));
+
+    let querySnapshot;
+    try {
+        // Prefer server data so recently deleted exams are not selected from stale local cache.
+        querySnapshot = await getDocsFromServer(q);
+    } catch (err) {
+        console.warn('Server fetch failed for password verification, falling back to cached data:', err);
+        querySnapshot = await getDocs(q);
+    }
     
     if (querySnapshot.empty) {
         return null;
     }
-    
-    const docData = querySnapshot.docs[0];
-    return {
-        id: docData.id,
-        ...docData.data()
-    };
+
+    const activeExams = querySnapshot.docs
+        .map(docSnapshot => ({
+            id: docSnapshot.id,
+            ...docSnapshot.data()
+        }))
+        .filter(exam => !exam.deleted);
+
+    if (activeExams.length === 0) {
+        return null;
+    }
+
+    activeExams.sort((a, b) => {
+        const aUpdated = a.updatedAt?.toMillis ? a.updatedAt.toMillis() : 0;
+        const bUpdated = b.updatedAt?.toMillis ? b.updatedAt.toMillis() : 0;
+        if (bUpdated !== aUpdated) {
+            return bUpdated - aUpdated;
+        }
+
+        const aCreated = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+        const bCreated = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+        return bCreated - aCreated;
+    });
+
+    return activeExams[0];
 }
 
 export async function getExamQuestions(examId) {
@@ -54,18 +85,16 @@ export async function saveStudentAnswer(examId, studentName, questionIndex, answ
     
     // 2. Queue write to Firestore (handled automatically by offline persistence)
     try {
-
         const submissionRef = doc(db, 'submissions', examId, 'students', studentName);
-        
-        // We ensure document exists first or merge fields
-        const docSnap = await getDoc(submissionRef);
-        
-        let answersArr = [];
-        if (docSnap.exists()) {
-            answersArr = docSnap.data().answers || [];
-        }
-        
-        answersArr[questionIndex] = answerSql;
+
+        // Build a sparse array from locally persisted answers without requiring a Firestore read.
+        const answersArr = [];
+        Object.entries(answersObj).forEach(([idx, sql]) => {
+            const parsed = Number(idx);
+            if (Number.isFinite(parsed)) {
+                answersArr[parsed] = sql;
+            }
+        });
         
         await setDoc(submissionRef, {
             answers: answersArr,
@@ -79,26 +108,47 @@ export async function saveStudentAnswer(examId, studentName, questionIndex, answ
 }
 
 export async function submitExam(examId, studentName) {
-    try {
+    const submissionRef = doc(db, 'submissions', examId, 'students', studentName);
+    await setDoc(submissionRef, {
+        submittedAt: serverTimestamp()
+    }, { merge: true });
 
-        const submissionRef = doc(db, 'submissions', examId, 'students', studentName);
-        await setDoc(submissionRef, {
-            submittedAt: serverTimestamp()
-        }, { merge: true });
-    } catch (err) {
-        console.warn("Submission finalize deferred:", err);
-    }
+    // Wait until local queued writes are acknowledged by backend.
+    await waitForPendingWrites(db);
 }
 
 
 // ---- ADMIN FUNCTIONS ----
 
 export async function createExam(title, password, questions, durationMinutes = 60) {
+    const normalizedPassword = String(password || '').trim();
+    if (!normalizedPassword) {
+        throw new Error('Exam password is required.');
+    }
 
     const examsRef = collection(db, 'exams');
+    const existingPasswordQuery = query(examsRef, where('password', '==', normalizedPassword));
+
+    let existingSnapshot;
+    try {
+        existingSnapshot = await getDocsFromServer(existingPasswordQuery);
+    } catch (err) {
+        console.warn('Server fetch failed for createExam duplicate check, falling back to cached data:', err);
+        existingSnapshot = await getDocs(existingPasswordQuery);
+    }
+
+    const hasActiveExamWithPassword = existingSnapshot.docs.some(docSnapshot => {
+        const data = docSnapshot.data();
+        return !data.deleted;
+    });
+
+    if (hasActiveExamWithPassword) {
+        throw new Error('Exam password already exists. Please use a different password.');
+    }
+
     await addDoc(examsRef, {
         title,
-        password,
+        password: normalizedPassword,
         questions,
         durationMinutes: parseInt(durationMinutes) || 60,
         createdAt: serverTimestamp()
@@ -128,18 +178,51 @@ export async function updateExamQuestions(examId, questions) {
 }
 
 export async function deleteExam(examId) {
-    const docRef = doc(db, 'exams', examId);
-    await setDoc(docRef, { deleted: true, deletedAt: serverTimestamp() }, { merge: true });
+    const studentsRef = collection(db, 'submissions', examId, 'students');
+    const studentsSnapshot = await getDocs(studentsRef);
+
+    const batchLimit = 450;
+    let batch = writeBatch(db);
+    let opCount = 0;
+
+    for (const studentDoc of studentsSnapshot.docs) {
+        batch.delete(studentDoc.ref);
+        opCount++;
+
+        if (opCount >= batchLimit) {
+            await batch.commit();
+            batch = writeBatch(db);
+            opCount = 0;
+        }
+    }
+
+    if (opCount > 0) {
+        await batch.commit();
+    }
+
+    // Remove parent submission doc if present, then remove exam doc.
+    await deleteDoc(doc(db, 'submissions', examId));
+    await deleteDoc(doc(db, 'exams', examId));
 }
 
 export async function getExamsList() {
 
     const examsRef = collection(db, 'exams');
     const snapshot = await getDocs(examsRef);
-    return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-    }));
+    const examList = snapshot.docs
+        .map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }))
+        .filter(exam => !exam.deleted);
+
+    examList.sort((a, b) => {
+        const aTime = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+        const bTime = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+        return bTime - aTime;
+    });
+
+    return examList;
 }
 
 export async function getSubmissionsForExam(examId) {
