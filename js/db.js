@@ -200,8 +200,8 @@ export async function deleteExam(examId) {
         await batch.commit();
     }
 
-    // Remove parent submission doc if present, then remove exam doc.
-    await deleteDoc(doc(db, 'submissions', examId));
+    // Remove exam doc after deleting all student submission docs.
+    // The parent submissions/{examId} doc is not required for this data model.
     await deleteDoc(doc(db, 'exams', examId));
 }
 

@@ -120,6 +120,7 @@
         let pendingSubmission = false;
         let essentialsLoaded = false;
         const submissionPendingBadgeText = 'EXAM ENDED-NO CHANGES WILL BE RECORDED FROM NOW';
+        const submissionWaitingInternetText = 'Waiting for internet connection to send the submission to the examiner (No changes will be recorded from now)';
 
 // Show offline mode indicator
 function showOfflineIndicator(msg) {
@@ -434,11 +435,10 @@ document.addEventListener('DOMContentLoaded', updateOfflineBanner);
             statusEl.style.display = 'block';
         };
 
-        const setSubmissionPendingBadge = (visible) => {
+        const setSubmissionPendingBadge = (visible, waitingForInternet = false) => {
             const badgeEl = document.getElementById('submissionPendingBadge');
             if (!badgeEl) return;
-
-            badgeEl.textContent = submissionPendingBadgeText;
+            badgeEl.textContent = waitingForInternet ? submissionWaitingInternetText : submissionPendingBadgeText;
             badgeEl.hidden = !visible;
         };
 
@@ -992,7 +992,8 @@ document.addEventListener('DOMContentLoaded', updateOfflineBanner);
             if (!confirmed) return;
 
             // Show badge immediately for user feedback
-            setSubmissionPendingBadge(true);
+            const hasInternet = await hasInternetConnection();
+            setSubmissionPendingBadge(true, !hasInternet);
             await finalizeExam();
         };
 

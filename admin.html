@@ -419,12 +419,23 @@
         });
 
         const handleDeleteExam = async (examId) => {
+            const examsListDiv = document.getElementById('examsList');
+            let examCard = null;
+            if (examsListDiv) {
+                examCard = examsListDiv.querySelector(`[data-exam-id="${examId}"]`);
+                if (examCard) {
+                    examCard.style.opacity = '0.5';
+                }
+            }
             try {
                 await deleteExam(examId);
                 await loadExams();
                 await populateExamSelect();
             } catch (err) {
-                alert('Error deleting exam: ' + err.message);
+                if (examCard) {
+                    examCard.style.opacity = '';
+                }
+                alert('Error deleting exam: ' + (err && err.message ? err.message : err));
             }
         };
 
